@@ -1,0 +1,19 @@
+# On every push and pull request, GitHub installs the project and runs `npm test`.
+# A green tick means all the tests in tests/ passed.
+
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm test

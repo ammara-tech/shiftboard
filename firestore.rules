@@ -1,0 +1,245 @@
+rules_version = '2';
+
+// ShiftBoard's security rules. Paste them into Firebase: Firestore Database → Rules → Publish.
+//
+// The app's code runs on people's phones, so anyone could change it. These rules run on
+// Google's servers and decide what each signed-in person can read and write, whatever
+// the app sends:
+//   - your profile: only you
+//   - a team: only its people can see it
+//   - the rota: only managers can add, change, publish or delete shifts; staff only ever see
+//     published shifts
+//   - requests: you can only ask for yourself, and only give away a shift that's yours; anyone
+//     else in the team can offer to take it; only managers approve or decline
+//   - pay rates: only managers can see or change them
+//   - joining: you can add only yourself, as staff, and only with a real invite code
+//   - leaving: you can remove only yourself, and the last manager can't leave while others stay
+//   - managers can remove people, make or unmake managers (a team always keeps one), and delete
+//     the team for everyone
+//   - invite codes can be looked up one at a time, but never listed
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function team(id) {
+      return get(/databases/$(database)/documents/teams/$(id));
+    }
+
+    function isMember(id) {
+      return signedIn() && request.auth.uid in team(id).data.memberIds;
+    }
+
+    function isManagerOf(id) {
+      return signedIn() && request.auth.uid in team(id).data.managerIds;
+    }
+
+    // Only these keys may change in an update
+    function onlyChanges(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    function goodName(name, max) {
+      return name is string && name.size() > 0 && name.size() <= max;
+    }
+
+    function isDate(s) {
+      return s is string && s.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+    }
+
+    function isTime(s) {
+      return s is string && s.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+    }
+
+    // ---------- Your profile ----------
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['name', 'teams', 'current'])
+        && goodName(request.resource.data.name, 30)
+        && request.resource.data.teams is list
+        && request.resource.data.teams.size() <= 20;
+    }
+
+    // ---------- Invite links ----------
+    match /invites/{code} {
+      // Knowing the code is the invitation: get one by its code, never list them
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn()
+        && code.size() == 12
+        && request.resource.data.keys().hasOnly(['teamId', 'teamName', 'createdBy'])
+        && request.resource.data.createdBy == request.auth.uid
+        // getAfter: the team may be created in the same batch
+        && request.auth.uid in getAfter(/databases/$(database)/documents/teams/$(request.resource.data.teamId)).data.managerIds;
+      allow update: if isManagerOf(resource.data.teamId)
+        && onlyChanges(['teamName'])
+        && goodName(request.resource.data.teamName, 30);
+      // A manager retires a link when making a new one, or when the team is deleted
+      allow delete: if isManagerOf(resource.data.teamId);
+    }
+
+    // ---------- Teams ----------
+    match /teams/{tid} {
+      function members() {
+        return resource.data.memberIds;
+      }
+      function managers() {
+        return resource.data.managerIds;
+      }
+      function uid() {
+        return request.auth.uid;
+      }
+      // The people removed by this update (empty when nobody leaves)
+      function leaving() {
+        return members().toSet().difference(request.resource.data.memberIds.toSet());
+      }
+
+      allow read: if signedIn() && uid() in members();
+
+      // A new team starts with just you in it, as its manager
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['name', 'createdBy', 'managerIds', 'memberIds', 'members', 'inviteCode', 'createdAt'])
+        && goodName(request.resource.data.name, 30)
+        && request.resource.data.createdBy == uid()
+        && request.resource.data.managerIds == [uid()]
+        && request.resource.data.memberIds == [uid()]
+        && request.resource.data.members.keys().hasOnly([uid()]);
+
+      allow update: if signedIn() && (
+        // Managers rename the team or make a new invite link
+        (uid() in managers()
+          && onlyChanges(['name', 'inviteCode'])
+          && goodName(request.resource.data.name, 30))
+        ||
+        // Managers set what people usually do ("Barista"); nobody is added or removed this way
+        (uid() in managers()
+          && onlyChanges(['members'])
+          && request.resource.data.members.keys().toSet() == resource.data.members.keys().toSet())
+        ||
+        // Anyone changes their own name (and only their own entry, keeping their role)
+        (uid() in members()
+          && onlyChanges(['members'])
+          && request.resource.data.members.diff(resource.data.members).affectedKeys().hasOnly([uid()])
+          && goodName(request.resource.data.members[uid()].name, 30)
+          && request.resource.data.members[uid()].get('role', '') == resource.data.members[uid()].get('role', ''))
+        ||
+        // Joining: add only yourself, as staff, with a real invite code for this team
+        (!(uid() in members())
+          && onlyChanges(['memberIds', 'members', 'lastInvite'])
+          && request.resource.data.memberIds.toSet().difference(members().toSet()) == [uid()].toSet()
+          && leaving().size() == 0
+          && request.resource.data.memberIds.size() <= 50
+          && request.resource.data.members.diff(resource.data.members).affectedKeys().hasOnly([uid()])
+          && get(/databases/$(database)/documents/invites/$(request.resource.data.lastInvite)).data.teamId == tid)
+        ||
+        // Leaving: remove only yourself. The team must still have a manager if anyone stays.
+        (uid() in members()
+          && onlyChanges(['memberIds', 'members', 'managerIds'])
+          && leaving() == [uid()].toSet()
+          && request.resource.data.memberIds.toSet().difference(members().toSet()).size() == 0
+          && request.resource.data.members.diff(resource.data.members).affectedKeys().hasOnly([uid()])
+          && managers().toSet().difference(request.resource.data.managerIds.toSet()).hasOnly([uid()])
+          && request.resource.data.managerIds.toSet().difference(managers().toSet()).size() == 0
+          && request.resource.data.managerIds.size() > 0)
+        ||
+        // A manager removes one other person (and their manager role, if they had one)
+        (uid() in managers()
+          && onlyChanges(['memberIds', 'members', 'managerIds'])
+          && leaving().size() == 1
+          && !(uid() in leaving())
+          && request.resource.data.memberIds.toSet().difference(members().toSet()).size() == 0
+          && request.resource.data.members.diff(resource.data.members).affectedKeys() == leaving()
+          && managers().toSet().difference(request.resource.data.managerIds.toSet()).difference(leaving()).size() == 0
+          && request.resource.data.managerIds.toSet().difference(managers().toSet()).size() == 0)
+        ||
+        // A manager makes someone a manager, or takes it away; there's always at least one
+        (uid() in managers()
+          && onlyChanges(['managerIds'])
+          && request.resource.data.managerIds.toSet().difference(members().toSet()).size() == 0
+          && request.resource.data.managerIds.size() > 0
+          && request.resource.data.managerIds.size() <= 50)
+      );
+
+      // A manager deletes the team for everyone; the last person deletes it by leaving
+      allow delete: if signedIn() && (uid() in managers() || members() == [uid()]);
+
+      // ---------- The rota ----------
+      match /shifts/{shiftId} {
+        function goodShift(d) {
+          return d.keys().hasOnly(['staffId', 'date', 'start', 'end', 'breakMins', 'note', 'published', 'createdAt'])
+            && d.staffId is string
+            && (d.staffId == '' || d.staffId in team(tid).data.memberIds)
+            && isDate(d.date)
+            && isTime(d.start)
+            && isTime(d.end)
+            && d.breakMins is int && d.breakMins >= 0 && d.breakMins <= 240
+            && d.note is string && d.note.size() <= 40
+            && d.published is bool;
+        }
+
+        // Managers see every shift; staff only see published ones
+        allow read: if isManagerOf(tid) || (isMember(tid) && resource.data.published == true);
+        allow create, update: if isManagerOf(tid) && goodShift(request.resource.data);
+        allow delete: if isManagerOf(tid);
+      }
+
+      // ---------- Time off and giving shifts away ----------
+      match /requests/{reqId} {
+        function goodNew(d) {
+          return d.keys().hasOnly(['kind', 'by', 'from', 'to', 'shiftId', 'takerId', 'note', 'status', 'decidedBy', 'createdAt', 'decidedAt'])
+            && d.by == request.auth.uid
+            && d.status == 'pending'
+            && d.takerId == ''
+            && d.decidedBy == ''
+            && d.decidedAt == null
+            && d.note is string && d.note.size() <= 200
+            && (
+              (d.kind == 'off' && isDate(d.from) && isDate(d.to) && d.to >= d.from && d.shiftId == '')
+              ||
+              // You can only give away a shift that's yours
+              (d.kind == 'giveaway' && d.from == '' && d.to == ''
+                && get(/databases/$(database)/documents/teams/$(tid)/shifts/$(d.shiftId)).data.staffId == request.auth.uid)
+            );
+        }
+
+        allow read: if isMember(tid);
+        allow create: if isMember(tid) && goodNew(request.resource.data);
+
+        allow update: if isMember(tid) && resource.data.status == 'pending' && (
+          // You cancel your own request
+          (resource.data.by == request.auth.uid
+            && onlyChanges(['status', 'decidedAt'])
+            && request.resource.data.status == 'cancelled')
+          ||
+          // Someone else offers to take a shift, or takes the offer back
+          (resource.data.kind == 'giveaway'
+            && resource.data.by != request.auth.uid
+            && onlyChanges(['takerId'])
+            && ((resource.data.takerId == '' && request.resource.data.takerId == request.auth.uid)
+              || (resource.data.takerId == request.auth.uid && request.resource.data.takerId == '')))
+          ||
+          // A manager approves or declines
+          (isManagerOf(tid)
+            && onlyChanges(['status', 'decidedBy', 'decidedAt'])
+            && request.resource.data.status in ['approved', 'declined']
+            && request.resource.data.decidedBy == request.auth.uid)
+        );
+
+        allow delete: if isManagerOf(tid);
+      }
+
+      // ---------- Pay rates: managers only ----------
+      match /private/{docId} {
+        allow read, delete: if isManagerOf(tid);
+        allow create, update: if isManagerOf(tid)
+          && docId == 'pay'
+          && request.resource.data.keys().hasOnly(['rates'])
+          && request.resource.data.rates is map
+          && request.resource.data.rates.size() <= 50;
+      }
+    }
+  }
+}

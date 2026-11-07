@@ -1,0 +1,155 @@
+@import "tailwindcss";
+
+/*
+  ShiftBoard's look: the rota pinned to a staffroom whiteboard.
+  Navy ink on white, marker blue for buttons and booked shifts, amber for drafts and open
+  shifts that still need someone, teal for hours and pay, and red for clashes and deleting.
+  Dark mode is the same board after closing time.
+*/
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme {
+  --color-page: #f3f5f9; /* the board */
+  --color-card: #ffffff; /* panels, shifts and forms */
+  --color-ink: #18213a; /* text */
+  --color-ink-soft: #4f5970; /* quieter text (passes AA on page and card) */
+  --color-line: #dde2ec;
+  --color-marker: #2453a6; /* buttons, links, booked shifts */
+  --color-on-marker: #ffffff;
+  --color-marker-soft: #e3ebfa;
+  --color-amber: #9a4a06; /* drafts and open shifts (dark enough for small text) */
+  --color-amber-soft: #fdf0d9;
+  --color-teal: #0f766e; /* hours and pay */
+  --color-teal-soft: #dcf3ef;
+  --color-alert: #b42318; /* clashes, delete, leave */
+  --color-alert-soft: #fde8e6;
+
+  --font-sans: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+}
+
+:root[data-theme="dark"] {
+  --color-page: #0f1524;
+  --color-card: #182136;
+  --color-ink: #e8edf7;
+  --color-ink-soft: #a5afc4;
+  --color-line: #2a3550;
+  --color-marker: #8fb2f5;
+  --color-on-marker: #0f1524;
+  --color-marker-soft: #1f2d4d;
+  --color-amber: #f5b867;
+  --color-amber-soft: #3a2a14;
+  --color-teal: #5fd3c6;
+  --color-teal-soft: #15343a;
+  --color-alert: #ff9b8f;
+  --color-alert-soft: #3d1c1c;
+  color-scheme: dark;
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  background: var(--color-page);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-marker);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+@layer components {
+  /* Round icon buttons */
+  .tool {
+    display: inline-flex;
+    height: 2.5rem;
+    min-width: 2.5rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    color: var(--color-ink-soft);
+  }
+  .tool:hover {
+    background: var(--color-marker-soft);
+    color: var(--color-marker);
+  }
+  /* Text boxes */
+  .field {
+    width: 100%;
+    border-radius: 0.75rem;
+    border: 1px solid var(--color-line);
+    background: var(--color-card);
+    color: var(--color-ink);
+    padding: 0.7rem 0.9rem;
+    font-size: 16px; /* 16px stops phones zooming in when you tap a box */
+  }
+  .field::placeholder {
+    color: var(--color-ink-soft);
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 0.75rem;
+    padding: 0.7rem 1.1rem;
+    font-weight: 700;
+    background: var(--color-marker);
+    color: var(--color-on-marker);
+  }
+  .btn:hover {
+    filter: brightness(1.08);
+  }
+  .btn:disabled {
+    opacity: 0.6;
+  }
+  .btn-quiet {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 0.75rem;
+    padding: 0.6rem 1rem;
+    font-weight: 600;
+    border: 1px solid var(--color-line);
+    background: var(--color-card);
+    color: var(--color-ink);
+  }
+  .btn-quiet:hover {
+    border-color: var(--color-marker);
+    color: var(--color-marker);
+  }
+}
+
+/* New live messages slide up */
+@keyframes rise {
+  from {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.rise {
+  animation: rise 220ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise {
+    animation: none;
+  }
+}
+
+/* Before Firebase has checked who's signed in, the page has both the loading screen and the
+   sign-in screen; the hint from app/layout.tsx picks which one shows (see lib/auth.ts). */
+html[data-signed-in] .gate-login,
+html:not([data-signed-in]) .gate-splash {
+  display: none;
+}
