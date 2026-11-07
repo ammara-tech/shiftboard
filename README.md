@@ -3,7 +3,7 @@
 **The staff rota for small businesses.** A manager builds the week's shifts and publishes them to everyone's
 phone. Staff see their shifts, give a shift away or ask for time off, and the hours add up for payroll.
 
-**Live site:** _add your Vercel link here once it's deployed_
+**Live site:** https://shiftboard-zeta.vercel.app/
 
 Built by Ammara Badat as part of my portfolio. It uses Firebase, like PaperTrail, TickList and Rememba, so it
 updates live on every phone and keeps working with no signal.
