@@ -68,7 +68,8 @@ export default function LoginScreen() {
           ShiftBoard
         </p>
         <DemoBoard />
-        <h1 className="relative mt-auto max-w-md text-5xl font-extrabold leading-[1.05] tracking-tight">Everyone&apos;s shifts, on everyone&apos;s phone.</h1>
+        {/* A big line of text, not the page's heading: on phones this side is hidden, so "Welcome back" is the h1 */}
+        <p className="relative mt-auto max-w-md text-5xl font-extrabold leading-[1.05] tracking-tight">Everyone&apos;s shifts, on everyone&apos;s phone.</p>
         <p className="relative mt-5 max-w-md text-lg text-white/85">
           The rota for your café, salon or shop. Staff see their shifts the moment you publish, swap shifts and ask for time off, and the hours add up for payroll.
         </p>
@@ -89,7 +90,7 @@ export default function LoginScreen() {
               <strong>You&apos;ve been invited to a team.</strong> Sign in or create an account, and you&apos;ll join it straight after.
             </p>
           )}
-          <h2 className="text-3xl font-extrabold tracking-tight">{mode === "signIn" ? "Welcome back" : "Create your account"}</h2>
+          <h1 className="text-3xl font-extrabold tracking-tight">{mode === "signIn" ? "Welcome back" : "Create your account"}</h1>
           <p className="mt-2 text-ink-soft">{mode === "signIn" ? "Sign in to see the rota." : "It's free, and takes a minute."}</p>
 
           <button type="button" disabled={busy} onClick={() => run(signInGoogle)} className="btn-quiet mt-8 w-full py-3">
