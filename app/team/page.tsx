@@ -5,7 +5,11 @@ import { useRouter } from "next/navigation";
 import Avatar from "@/components/Avatar";
 import Icon from "@/components/Icon";
 import {
+  addExtra,
   createTeam,
+  linkExtra,
+  removeExtra,
+  setMyUnavailable,
   deleteTeamForEveryone,
   leaveTeam,
   newInviteLink,
@@ -21,16 +25,19 @@ import {
 import { signOutUser } from "@/lib/auth";
 import { codeFromInput, inviteLink, inviteMessage } from "@/lib/invite";
 import { formatRand, parseRand } from "@/lib/money";
-import { canLeave, canStepDown, isManager, people } from "@/lib/team";
+import { canLeave, canStepDown, isManager, linkCandidates, people } from "@/lib/team";
+import { describeUnavailable, EVERY_DAY, isValidUnavailable, withUnavailable, withoutUnavailable } from "@/lib/availability";
+import type { Unavailable } from "@/lib/types";
 import { useApp } from "@/lib/store";
 
 /*
   /team: everything about the team and you.
-  - Everyone: the people in the team, your name, switching between teams (someone who works at
-    two places), leaving and signing out.
+  - Everyone: the people in the team, when you can't work (lib/availability.ts), your name,
+    switching between teams (someone who works at two places), leaving and signing out.
   - Managers also: the team's name, the invite link, what each person usually does ("Barista"),
     pay rates (only managers can see them), making someone a manager or not, removing people,
-    and deleting the team for everyone.
+    adding people by name before they've joined (and linking them up when they do), and deleting
+    the team for everyone.
   lib/team.ts has the rules; firestore.rules checks them on Google's servers.
 */
 export default function TeamPage() {
@@ -137,10 +144,15 @@ export default function TeamPage() {
                   <span className="block font-semibold">
                     {p.name} {p.id === uid && <span className="font-normal text-ink-soft">(you)</span>}
                     {p.manager && <span className="ml-2 rounded-full bg-marker-soft px-2 py-0.5 text-xs font-bold text-marker">Manager</span>}
+                    {p.extra && <span className="ml-2 rounded-full bg-amber-soft px-2 py-0.5 text-xs font-bold text-amber">Not joined yet</span>}
                   </span>
                   {!manager && p.role && <span className="block text-sm text-ink-soft">{p.role}</span>}
+                  {(p.unavailable ?? []).length > 0 && (
+                    <span className="block text-xs text-ink-soft">Can&apos;t work: {(p.unavailable ?? []).map(describeUnavailable).join("; ")}</span>
+                  )}
                 </span>
-                {manager &&
+                {manager && p.extra && <ExtraActions id={p.id} name={p.name} candidates={linkCandidates(team)} busy={busy} act={act} />}
+                {manager && !p.extra &&
                   (asking === p.id ? (
                     <span className="flex flex-wrap items-center gap-2 text-sm">
                       Remove {p.name}? Their coming shifts become open shifts.
@@ -181,6 +193,16 @@ export default function TeamPage() {
             </li>
           ))}
         </ul>
+      </Panel>
+
+      {manager && (
+        <Panel title="Add someone by name" hint="For staff who haven't joined yet, so you can put them on the rota now. When they join with the invite link, link them up on this page and their shifts move to their account.">
+          <AddExtra />
+        </Panel>
+      )}
+
+      <Panel title="When you can't work" hint="Every week, like Mondays or Friday evenings. Your managers see this, and the rota warns them if they book you then.">
+        <Availability list={team.members[uid]?.unavailable ?? []} />
       </Panel>
 
       {manager && (
@@ -261,6 +283,181 @@ export default function TeamPage() {
           </button>
         </div>
       </Panel>
+    </div>
+  );
+}
+
+/* Managers: link someone added by name to their account once they've joined, or remove them */
+function ExtraActions({
+  id,
+  name,
+  candidates,
+  busy,
+  act,
+}: {
+  id: string;
+  name: string;
+  candidates: { id: string; name: string }[];
+  busy: boolean;
+  act: (action: () => Promise<unknown>, after?: () => void) => Promise<void>;
+}) {
+  const [mode, setMode] = useState<"none" | "link" | "remove">("none");
+  const [target, setTarget] = useState(candidates[0]?.id ?? "");
+  if (mode === "link") {
+    return (
+      <span className="flex w-full flex-wrap items-center gap-2 text-sm">
+        <label htmlFor={`link-${id}`}>{name} joined as:</label>
+        <select id={`link-${id}`} value={target} onChange={(e) => setTarget(e.target.value)} className="field w-auto py-1.5 text-sm">
+          {candidates.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        <button type="button" disabled={busy || !target} onClick={() => act(() => linkExtra(id, target), () => setMode("none"))} className="btn px-3 py-1.5 text-sm">
+          Link and move their shifts
+        </button>
+        <button type="button" onClick={() => setMode("none")} className="btn-quiet px-3 py-1.5 text-sm">
+          Cancel
+        </button>
+      </span>
+    );
+  }
+  if (mode === "remove") {
+    return (
+      <span className="flex flex-wrap items-center gap-2 text-sm">
+        Remove {name}? Their coming shifts become open shifts.
+        <button type="button" disabled={busy} onClick={() => act(() => removeExtra(id), () => setMode("none"))} className="btn px-3 py-1.5 text-sm !bg-alert !text-white">
+          Remove
+        </button>
+        <button type="button" onClick={() => setMode("none")} className="btn-quiet px-3 py-1.5 text-sm">
+          Cancel
+        </button>
+      </span>
+    );
+  }
+  return (
+    <span className="flex flex-wrap gap-1">
+      <button type="button" onClick={() => setMode("link")} className="btn-quiet px-3 py-1.5 text-sm">
+        They&apos;ve joined: link<span className="sr-only"> {name}</span>
+      </button>
+      <button type="button" onClick={() => setMode("remove")} className="btn-quiet px-3 py-1.5 text-sm !text-alert hover:!border-alert">
+        Remove<span className="sr-only"> {name}</span>
+      </button>
+    </span>
+  );
+}
+
+/* Managers: add someone who doesn't have an account yet */
+function AddExtra() {
+  const [name, setName] = useState("");
+  const [role, setRoleText] = useState("");
+  const [added, setAdded] = useState<string | null>(null);
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!name.trim()) return;
+        addExtra(name, role);
+        setAdded(name.trim());
+        setName("");
+        setRoleText("");
+      }}
+      className="grid gap-3 sm:grid-cols-3 sm:items-end"
+    >
+      <label className="block text-sm font-semibold">
+        Name
+        <input value={name} onChange={(e) => {
+            setName(e.target.value);
+            setAdded(null);
+          }} maxLength={30} required placeholder="e.g. Zanele" className="field mt-1 font-normal" />
+      </label>
+      <label className="block text-sm font-semibold">
+        What they do (optional)
+        <input value={role} onChange={(e) => setRoleText(e.target.value)} maxLength={30} placeholder="e.g. Waiter" className="field mt-1 font-normal" />
+      </label>
+      <button type="submit" className="btn">
+        <Icon name="userPlus" className="h-4 w-4" />
+        Add
+      </button>
+      {added && (
+        <p role="status" className="text-sm font-semibold text-teal sm:col-span-3">
+          Added {added}. You can put them on the rota now.
+        </p>
+      )}
+    </form>
+  );
+}
+
+/* Your own times you can't work, every week */
+function Availability({ list }: { list: Unavailable[] }) {
+  const [day, setDay] = useState(0);
+  const [allDay, setAllDay] = useState(true);
+  const [from, setFrom] = useState("17:00");
+  const [to, setTo] = useState("23:59");
+  const [error, setError] = useState(false);
+
+  function add(e: FormEvent) {
+    e.preventDefault();
+    const u = { day, from: allDay ? "" : from, to: allDay ? "" : to };
+    if (!isValidUnavailable(u)) return setError(true);
+    setError(false);
+    setMyUnavailable(withUnavailable(list, u));
+  }
+
+  return (
+    <div>
+      {list.length === 0 ? (
+        <p className="text-sm text-ink-soft">You haven&apos;t added any. You can work any time.</p>
+      ) : (
+        <ul className="divide-y divide-line">
+          {list.map((u, i) => (
+            <li key={`${u.day}${u.from}${u.to}`} className="flex items-center justify-between gap-3 py-2">
+              <span className="font-semibold">{describeUnavailable(u)}</span>
+              <button type="button" onClick={() => setMyUnavailable(withoutUnavailable(list, i))} className="text-sm font-bold text-alert hover:underline">
+                Remove<span className="sr-only"> {describeUnavailable(u)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form onSubmit={add} className="mt-3 flex flex-wrap items-end gap-3">
+        <label className="block text-sm font-semibold">
+          Day
+          <select value={day} onChange={(e) => setDay(Number(e.target.value))} className="field mt-1 w-auto font-normal">
+            {EVERY_DAY.map((d, i) => (
+              <option key={d} value={i}>
+                {d}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-2 pb-3 text-sm font-semibold">
+          <input type="checkbox" checked={allDay} onChange={(e) => setAllDay(e.target.checked)} className="h-4 w-4 accent-[var(--color-marker)]" />
+          All day
+        </label>
+        {!allDay && (
+          <>
+            <label className="block text-sm font-semibold">
+              From
+              <input type="time" value={from} onChange={(e) => setFrom(e.target.value)} className="field mt-1 w-auto font-normal" />
+            </label>
+            <label className="block text-sm font-semibold">
+              To
+              <input type="time" value={to} onChange={(e) => setTo(e.target.value)} className="field mt-1 w-auto font-normal" />
+            </label>
+          </>
+        )}
+        <button type="submit" className="btn-quiet">
+          <Icon name="plus" className="h-4 w-4" />
+          Add
+        </button>
+      </form>
+      {error && (
+        <p role="alert" className="mt-2 text-sm font-semibold text-alert">
+          The &quot;to&quot; time has to be after the &quot;from&quot; time.
+        </p>
+      )}
     </div>
   );
 }

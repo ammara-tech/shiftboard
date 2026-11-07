@@ -1,9 +1,12 @@
 import { addDays, formatMinutes, paidMinutes, weekDays } from "@/lib/rota";
+import { minutesLate, workedMinutes } from "@/lib/clock";
 import type { PayRates, Shift } from "@/lib/types";
 
 /*
   Hours and pay for a week, from the rota.
-  - Hours are paid time: each shift's length minus its unpaid break.
+  - Hours are paid time: each shift's length minus its unpaid break. When someone clocked in and
+    out (lib/clock.ts), their real times are used instead of the rota's, and "planned" keeps the
+    rota's hours so the two can be compared. Clocking in more than 5 minutes late is counted.
   - Pay is an estimate: hours × the person's rate per hour. It doesn't include overtime or Sunday
     and public holiday rates, which the Basic Conditions of Employment Act sets, so the Hours page
     says it's a guide for payroll, not a payslip.
@@ -20,6 +23,9 @@ export type HoursRow = {
   shifts: number;
   minutes: number;
   perDay: number[]; // paid minutes Mon … Sun
+  planned: number; // paid minutes on the rota, before clocking in and out
+  clocked: number; // how many shifts were clocked in and out
+  late: number; // how many shifts were clocked in late
   pay: number | null; // cents, or null if no rate is set
   overLimit: boolean;
 };
@@ -30,16 +36,21 @@ export function weekHours(shifts: Shift[], monday: string, rates: PayRates, incl
   const end = addDays(monday, 6);
   const rows = new Map<string, HoursRow>();
   const row = (staffId: string) => {
-    if (!rows.has(staffId)) rows.set(staffId, { staffId, shifts: 0, minutes: 0, perDay: [0, 0, 0, 0, 0, 0, 0], pay: null, overLimit: false });
+    if (!rows.has(staffId)) rows.set(staffId, { staffId, shifts: 0, minutes: 0, perDay: [0, 0, 0, 0, 0, 0, 0], planned: 0, clocked: 0, late: 0, pay: null, overLimit: false });
     return rows.get(staffId)!;
   };
   include.forEach(row);
   for (const s of shifts) {
     if (!s.published || !s.staffId || s.date < monday || s.date > end) continue;
     const r = row(s.staffId);
-    const mins = paidMinutes(s);
+    const planned = paidMinutes(s);
+    const worked = workedMinutes(s);
+    const mins = worked ?? planned;
     r.shifts += 1;
     r.minutes += mins;
+    r.planned += planned;
+    if (worked !== null) r.clocked += 1;
+    if (minutesLate(s) > 0) r.late += 1;
     r.perDay[days.indexOf(s.date)] += mins;
   }
   for (const r of rows.values()) {
@@ -66,10 +77,10 @@ const csvCell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` 
 /** The week's hours as a CSV file for payroll or an accountant (opens in Excel or Google Sheets) */
 export function hoursCsv(rows: HoursRow[], monday: string, nameOf: (id: string) => string, withPay: boolean) {
   const days = weekDays(monday);
-  const head = ["Name", ...days, "Shifts", "Hours", ...(withPay ? ["Rate per hour (R)", "Estimated pay (R)"] : [])];
+  const head = ["Name", ...days, "Shifts", "Hours", "Planned hours", "Late", ...(withPay ? ["Rate per hour (R)", "Estimated pay (R)"] : [])];
   const lines = [head.join(",")];
   for (const r of rows) {
-    const cells = [nameOf(r.staffId), ...r.perDay.map(decimalHours), String(r.shifts), decimalHours(r.minutes)];
+    const cells = [nameOf(r.staffId), ...r.perDay.map(decimalHours), String(r.shifts), decimalHours(r.minutes), decimalHours(r.planned), String(r.late)];
     if (withPay) cells.push(r.pay === null ? "" : (Math.round((r.pay / Math.max(r.minutes, 1)) * 60) / 100).toFixed(2), r.pay === null ? "" : (r.pay / 100).toFixed(2));
     lines.push(cells.map(csvCell).join(","));
   }

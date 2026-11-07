@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { WEEKLY_LIMIT_MINUTES, decimalHours, hoursCsv, totals, weekHours } from "@/lib/hours";
 import type { Shift } from "@/lib/types";
+import { localTime } from "@/lib/clock";
 
 let n = 0;
 const shift = (s: Partial<Shift>): Shift => ({ id: `s${++n}`, staffId: "thabo", date: "2026-11-09", start: "08:00", end: "16:30", breakMins: 30, note: "", published: true, createdAt: n, ...s });
@@ -33,7 +34,7 @@ describe("hours for a week", () => {
   });
 
   it("includes people with no shifts when asked, so everyone is listed", () => {
-    expect(weekHours([], "2026-11-09", {}, ["sipho"])).toEqual([{ staffId: "sipho", shifts: 0, minutes: 0, perDay: [0, 0, 0, 0, 0, 0, 0], pay: null, overLimit: false }]);
+    expect(weekHours([], "2026-11-09", {}, ["sipho"])).toEqual([{ staffId: "sipho", shifts: 0, minutes: 0, perDay: [0, 0, 0, 0, 0, 0, 0], planned: 0, clocked: 0, late: 0, pay: null, overLimit: false }]);
   });
 
   it("flags more than 45 hours in a week", () => {
@@ -48,14 +49,31 @@ describe("the spreadsheet for payroll", () => {
   it("has a row per person, hours as decimals, and pay only when asked", () => {
     const rows = weekHours([shift({}), shift({ staffId: "lerato", date: "2026-11-10", end: "12:15", breakMins: 0 })], "2026-11-09", { thabo: 3500 });
     const csv = hoursCsv(rows, "2026-11-09", nameOf, true).split("\r\n");
-    expect(csv[0]).toBe("Name,2026-11-09,2026-11-10,2026-11-11,2026-11-12,2026-11-13,2026-11-14,2026-11-15,Shifts,Hours,Rate per hour (R),Estimated pay (R)");
-    expect(csv[1]).toBe("Thabo,8.00,0.00,0.00,0.00,0.00,0.00,0.00,1,8.00,35.00,280.00");
-    expect(csv[2]).toBe('"Lerato, Jnr",0.00,4.25,0.00,0.00,0.00,0.00,0.00,1,4.25,,'); // a comma in a name is quoted
+    expect(csv[0]).toBe("Name,2026-11-09,2026-11-10,2026-11-11,2026-11-12,2026-11-13,2026-11-14,2026-11-15,Shifts,Hours,Planned hours,Late,Rate per hour (R),Estimated pay (R)");
+    expect(csv[1]).toBe("Thabo,8.00,0.00,0.00,0.00,0.00,0.00,0.00,1,8.00,8.00,0,35.00,280.00");
+    expect(csv[2]).toBe('"Lerato, Jnr",0.00,4.25,0.00,0.00,0.00,0.00,0.00,1,4.25,4.25,0,,'); // a comma in a name is quoted
     expect(hoursCsv(rows, "2026-11-09", nameOf, false).split("\r\n")[0]).not.toContain("pay");
   });
 
   it("writes hours the way spreadsheets add them", () => {
     expect(decimalHours(450)).toBe("7.50");
     expect(decimalHours(20)).toBe("0.33");
+  });
+});
+
+describe("clocked hours", () => {
+  it("uses the clocked times when someone clocked in and out, and keeps the rota's hours as planned", () => {
+    const clocked = shift({ start: "08:00", end: "16:30", breakMins: 30, clockIn: localTime("2026-11-09", "08:12"), clockOut: localTime("2026-11-09", "17:12") });
+    const [row] = weekHours([clocked], "2026-11-09", { thabo: 6000 });
+    expect(row.minutes).toBe(510); // 9h clocked − 30m break
+    expect(row.planned).toBe(480);
+    expect(row.clocked).toBe(1);
+    expect(row.late).toBe(1); // 12 minutes after the start
+    expect(row.pay).toBe(51000); // 8.5h × R60
+  });
+
+  it("uses the rota's times when a shift wasn't clocked out", () => {
+    const [row] = weekHours([shift({ clockIn: localTime("2026-11-09", "08:00") })], "2026-11-09", {});
+    expect([row.minutes, row.clocked, row.late]).toEqual([480, 0, 0]);
   });
 });

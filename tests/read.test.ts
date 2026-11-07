@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readRequest, readShift, requestChanges, shiftChanges } from "@/lib/read";
+import { noticeChanges, readNotice, readRequest, readShift, requestChanges, shiftChanges } from "@/lib/read";
 import type { Shift, ShiftRequest } from "@/lib/types";
 
 const shift = (s: Partial<Shift>): Shift => ({ id: "s1", staffId: "me", date: "2026-11-09", start: "08:00", end: "16:00", breakMins: 30, note: "", published: true, createdAt: 0, ...s });
@@ -8,7 +8,7 @@ const team = { managerIds: ["me"], members: { me: { name: "Ammara", joinedAt: 0 
 
 describe("reading from the database", () => {
   it("keeps good shifts as they are", () => {
-    expect(readShift("s1", { staffId: "me", date: "2026-11-09", start: "08:00", end: "16:00", breakMins: 30, note: "Opening", published: true, createdAt: 5 })).toEqual({ id: "s1", staffId: "me", date: "2026-11-09", start: "08:00", end: "16:00", breakMins: 30, note: "Opening", published: true, createdAt: 5 });
+    expect(readShift("s1", { staffId: "me", date: "2026-11-09", start: "08:00", end: "16:00", breakMins: 30, note: "Opening", published: true, createdAt: 5 })).toEqual({ id: "s1", staffId: "me", date: "2026-11-09", start: "08:00", end: "16:00", breakMins: 30, note: "Opening", published: true, createdAt: 5, clockIn: null, clockOut: null });
   });
 
   it("fixes broken values instead of breaking the page", () => {
@@ -49,5 +49,15 @@ describe("messages about requests", () => {
     expect(requestChanges([give], [{ ...give, takerId: "lerato" }], "thabo", team)).toEqual(["Lerato offered to take your shift"]);
     expect(requestChanges([give], [{ ...give, takerId: "lerato" }], "me", team)).toEqual(["Lerato offered to take Thabo's shift"]);
     expect(requestChanges([{ ...give, takerId: "lerato" }], [{ ...give, takerId: "lerato", status: "approved", decidedBy: "me" }], "lerato", team)).toEqual(["The shift is yours now. Thanks for taking it!"]);
+  });
+});
+
+describe("notices", () => {
+  it("reads a notice, and announces new ones from other people", () => {
+    const n = readNotice("n1", { text: "Stock take on Friday at 7", by: "me", createdAt: 5, readBy: ["thabo", 3] });
+    expect(n).toEqual({ id: "n1", text: "Stock take on Friday at 7", by: "me", createdAt: 5, readBy: ["thabo"] });
+    expect(noticeChanges([], [n], "thabo", team)).toEqual(["New notice from Ammara: Stock take on Friday at 7"]);
+    expect(noticeChanges([], [n], "me", team)).toEqual([]);
+    expect(noticeChanges([n], [n], "thabo", team)).toEqual([]);
   });
 });

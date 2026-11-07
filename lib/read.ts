@@ -1,6 +1,6 @@
 import { isIsoDate, isTime, dayLabel, weekLabel, weekStart } from "@/lib/rota";
 import { datesLabel } from "@/lib/requests";
-import type { RequestKind, RequestStatus, Shift, ShiftRequest, Team } from "@/lib/types";
+import type { Notice, RequestKind, RequestStatus, Shift, ShiftRequest, Team } from "@/lib/types";
 
 /*
   Reading shifts and requests from Firestore, checked, so a broken document can't break a screen.
@@ -23,7 +23,28 @@ export function readShift(id: string, d: Record<string, unknown>): Shift {
     note: text(d.note, 40),
     published: d.published === true,
     createdAt: num(d.createdAt),
+    clockIn: typeof d.clockIn === "number" ? d.clockIn : null,
+    clockOut: typeof d.clockOut === "number" ? d.clockOut : null,
   };
+}
+
+export function readNotice(id: string, d: Record<string, unknown>): Notice {
+  return {
+    id,
+    text: text(d.text, 300),
+    by: text(d.by, 128),
+    createdAt: num(d.createdAt),
+    readBy: Array.isArray(d.readBy) ? d.readBy.filter((x): x is string => typeof x === "string") : [],
+  };
+}
+
+/** "New notice from Ammara: Stock take on Friday" for notices someone else posted */
+export function noticeChanges(before: Notice[], after: Notice[], me: string, team: Pick<Team, "members">) {
+  const had = new Set(before.map((n) => n.id));
+  return after
+    .filter((n) => !had.has(n.id) && n.by !== me)
+    .slice(0, 2)
+    .map((n) => `New notice from ${team.members[n.by]?.name || "a manager"}: ${n.text.length > 60 ? `${n.text.slice(0, 57)}…` : n.text}`);
 }
 
 const KINDS: RequestKind[] = ["off", "giveaway"];

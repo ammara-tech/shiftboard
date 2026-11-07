@@ -11,6 +11,10 @@ rules_version = '2';
 //     published shifts
 //   - requests: you can only ask for yourself, and only give away a shift that's yours; anyone
 //     else in the team can offer to take it; only managers approve or decline
+//   - clocking in and out: only on your own published shift, once each, and only with a time
+//     within a few minutes of now (so nobody can clock in for yesterday); managers can correct it
+//   - the notice board: managers post and delete notices; everyone can mark one as read (only for themselves)
+//   - availability: each person sets their own; people added by name are managed by managers
 //   - pay rates: only managers can see or change them
 //   - joining: you can add only yourself, as staff, and only with a real invite code
 //   - leaving: you can remove only yourself, and the last manager can't leave while others stay
@@ -114,17 +118,21 @@ service cloud.firestore {
           && onlyChanges(['name', 'inviteCode'])
           && goodName(request.resource.data.name, 30))
         ||
-        // Managers set what people usually do ("Barista"); nobody is added or removed this way
+        // Managers set what people usually do ("Barista"), and add, change, link or remove people
+        // added by name; nobody who has joined is added or removed this way
         (uid() in managers()
-          && onlyChanges(['members'])
-          && request.resource.data.members.keys().toSet() == resource.data.members.keys().toSet())
+          && onlyChanges(['members', 'extras'])
+          && request.resource.data.members.keys().toSet() == resource.data.members.keys().toSet()
+          && request.resource.data.get('extras', {}) is map
+          && request.resource.data.get('extras', {}).size() <= 50)
         ||
         // Anyone changes their own name (and only their own entry, keeping their role)
         (uid() in members()
           && onlyChanges(['members'])
           && request.resource.data.members.diff(resource.data.members).affectedKeys().hasOnly([uid()])
           && goodName(request.resource.data.members[uid()].name, 30)
-          && request.resource.data.members[uid()].get('role', '') == resource.data.members[uid()].get('role', ''))
+          && request.resource.data.members[uid()].get('role', '') == resource.data.members[uid()].get('role', '')
+          && request.resource.data.members[uid()].get('unavailable', []).size() <= 14)
         ||
         // Joining: add only yourself, as staff, with a real invite code for this team
         (!(uid() in members())
@@ -169,9 +177,11 @@ service cloud.firestore {
       // ---------- The rota ----------
       match /shifts/{shiftId} {
         function goodShift(d) {
-          return d.keys().hasOnly(['staffId', 'date', 'start', 'end', 'breakMins', 'note', 'published', 'createdAt'])
+          return d.keys().hasOnly(['staffId', 'date', 'start', 'end', 'breakMins', 'note', 'published', 'createdAt', 'clockIn', 'clockOut'])
             && d.staffId is string
-            && (d.staffId == '' || d.staffId in team(tid).data.memberIds)
+            && (d.staffId == '' || d.staffId in team(tid).data.memberIds || d.staffId in team(tid).data.get('extras', {}))
+            && (d.get('clockIn', null) == null || d.clockIn is int)
+            && (d.get('clockOut', null) == null || d.clockOut is int)
             && isDate(d.date)
             && isTime(d.start)
             && isTime(d.end)
@@ -182,7 +192,43 @@ service cloud.firestore {
 
         // Managers see every shift; staff only see published ones
         allow read: if isManagerOf(tid) || (isMember(tid) && resource.data.published == true);
-        allow create, update: if isManagerOf(tid) && goodShift(request.resource.data);
+        // A time from the person's phone, within 5 minutes of Google's clock
+        function aboutNow(t) {
+          return t is int && t > request.time.toMillis() - 300000 && t < request.time.toMillis() + 300000;
+        }
+
+        allow create: if isManagerOf(tid) && goodShift(request.resource.data);
+        allow update: if (isManagerOf(tid) && goodShift(request.resource.data))
+          // The person working a published shift clocks in, then out, once each
+          || (isMember(tid)
+            && resource.data.staffId == request.auth.uid
+            && resource.data.published == true
+            && onlyChanges(['clockIn', 'clockOut'])
+            && ((resource.data.get('clockIn', null) == null
+                  && aboutNow(request.resource.data.clockIn)
+                  && request.resource.data.get('clockOut', null) == null)
+              || (resource.data.get('clockIn', null) is int
+                  && resource.data.get('clockOut', null) == null
+                  && request.resource.data.clockIn == resource.data.clockIn
+                  && aboutNow(request.resource.data.clockOut)
+                  && request.resource.data.clockOut > resource.data.clockIn)));
+        allow delete: if isManagerOf(tid);
+      }
+
+      // ---------- The notice board ----------
+      match /notices/{noticeId} {
+        allow read: if isMember(tid);
+        allow create: if isManagerOf(tid)
+          && request.resource.data.keys().hasOnly(['text', 'by', 'createdAt', 'readBy'])
+          && goodName(request.resource.data.text, 300)
+          && request.resource.data.by == request.auth.uid
+          && request.resource.data.createdAt is int
+          && request.resource.data.readBy == [];
+        // "Got it": you can only add yourself to who has read it
+        allow update: if isMember(tid)
+          && onlyChanges(['readBy'])
+          && request.resource.data.readBy.toSet().difference(resource.data.readBy.toSet()) == [request.auth.uid].toSet()
+          && resource.data.readBy.toSet().difference(request.resource.data.readBy.toSet()).size() == 0;
         allow delete: if isManagerOf(tid);
       }
 

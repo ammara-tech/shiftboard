@@ -5,6 +5,9 @@ import Link from "next/link";
 import Avatar from "@/components/Avatar";
 import Icon from "@/components/Icon";
 import ShiftEditor from "@/components/ShiftEditor";
+import ClockCard from "@/components/ClockCard";
+import NoticeBoard from "@/components/NoticeBoard";
+import { clockTime, minutesLate } from "@/lib/clock";
 import { addShift, copyLastWeek, deleteShift, editShift, publishWeek, restoreShifts, type ShiftFields } from "@/lib/actions";
 import { colourFor } from "@/lib/members";
 import {
@@ -25,7 +28,7 @@ import {
   weekMessage,
   weekStart,
 } from "@/lib/rota";
-import { isManager, people } from "@/lib/team";
+import { isManager, people, personName } from "@/lib/team";
 import { addToast, useApp } from "@/lib/store";
 import type { Shift } from "@/lib/types";
 
@@ -39,6 +42,9 @@ import type { Shift } from "@/lib/types";
 
   Staff: see their next shift at the top, the whole team's published rota below, and can add
   their shifts to their phone's calendar.
+
+  Everyone: the notice board, and "Clock in" / "Clock out" when one of your shifts is on.
+  People a manager added by name (who haven't joined yet) have their own rows too.
 
   On a laptop the week is a table (people down the side, days across the top). On a phone it's
   a list, one day at a time, which is easier to read on a small screen.
@@ -58,10 +64,10 @@ export default function Rota() {
   if (!team || !uid) return null;
 
   const manager = isManager(team, uid);
-  const nameOf = (id: string) => team.members[id]?.name || "Someone";
+  const nameOf = (id: string) => personName(team, id);
   const days = weekDays(monday);
   const crew = people(team);
-  const problems = clashes(week, requests, nameOf);
+  const problems = clashes(week, requests, nameOf, team.members);
   const problemFor = (id: string) => problems.filter((p) => p.shiftId === id);
   const drafts = week.filter((s) => !s.published);
   const shown = onlyMine ? week.filter((s) => s.staffId === uid) : week;
@@ -114,6 +120,9 @@ export default function Rota() {
   return (
     <div>
       <h1 className="sr-only">{team.name}: the rota</h1>
+
+      <ClockCard />
+      <NoticeBoard />
 
       {/* Staff: your next shift */}
       {!manager && (
@@ -241,7 +250,7 @@ export default function Rota() {
               </tr>
             </thead>
             <tbody>
-              {[...crew.filter((p) => !onlyMine || p.id === uid), ...(onlyMine ? [] : [{ id: "", name: "Open shifts", role: "", manager: false, joinedAt: 0 }])].map((p) => {
+              {[...crew.filter((p) => !onlyMine || p.id === uid), ...(onlyMine ? [] : [{ id: "", name: "Open shifts", role: "", manager: false, extra: false, joinedAt: 0 }])].map((p) => {
                 const theirs = shown.filter((s) => s.staffId === p.id);
                 if (p.id === "" && theirs.length === 0 && !manager) return null;
                 return (
@@ -251,7 +260,9 @@ export default function Rota() {
                         {p.id ? <Avatar uid={p.id} name={p.name} /> : <span className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-dashed border-amber text-amber">?</span>}
                         <span className="min-w-0">
                           <span className="block truncate">{p.id === uid ? `${p.name} (you)` : p.name}</span>
-                          {p.role && <span className="block truncate text-xs font-normal text-ink-soft">{p.role}</span>}
+                          {(p.role || p.extra) && (
+                            <span className="block truncate text-xs font-normal text-ink-soft">{[p.role, p.extra ? "not joined yet" : ""].filter(Boolean).join(" · ")}</span>
+                          )}
                         </span>
                       </span>
                     </th>
@@ -370,6 +381,12 @@ function ShiftChip({ shift, manager, warn, onOpen, wide, name }: { shift: Shift;
           {!shift.staffId && <span className="font-bold text-amber">Open</span>}
           {!shift.staffId && shift.note && " · "}
           {shift.note}
+        </span>
+      )}
+      {typeof shift.clockIn === "number" && (
+        <span className="mt-0.5 block text-xs font-semibold text-teal">
+          {typeof shift.clockOut === "number" ? `Worked ${clockTime(shift.clockIn)} – ${clockTime(shift.clockOut)}` : `In at ${clockTime(shift.clockIn)}`}
+          {minutesLate(shift) > 0 && <span className="text-alert"> · {minutesLate(shift)} min late</span>}
         </span>
       )}
       {warn.map((w) => (

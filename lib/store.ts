@@ -3,9 +3,9 @@
 import { useSyncExternalStore } from "react";
 import { collection, doc, onSnapshot, query, where, type Unsubscribe } from "firebase/firestore";
 import { firebase } from "@/lib/firebase";
-import { readShift, readRequest, shiftChanges, requestChanges } from "@/lib/read";
+import { noticeChanges, readNotice, readShift, readRequest, shiftChanges, requestChanges } from "@/lib/read";
 import { teamChanges } from "@/lib/team";
-import type { PayRates, Profile, Shift, ShiftRequest, Team } from "@/lib/types";
+import type { Notice, PayRates, Profile, Shift, ShiftRequest, Team } from "@/lib/types";
 
 /*
   The app's live copy of your team, kept up to date by Firestore.
@@ -16,7 +16,8 @@ import type { PayRates, Profile, Shift, ShiftRequest, Team } from "@/lib/types";
     2. its shifts: managers get every shift; staff only get published ones (the rules refuse
        staff a draft, so the app asks only for published shifts)
     3. its requests: time off and shifts being given away
-    4. pay rates (teams/{id}/private/pay): managers only
+    4. its notice board
+    5. pay rates (teams/{id}/private/pay): managers only
   Whenever anyone changes something, Firestore sends the new version within a moment, every
   screen re-draws, and a message pops up ("Your shifts for 9 – 15 Nov are out").
 
@@ -33,6 +34,7 @@ export type AppState = {
   team: Team | null;
   shifts: Shift[];
   requests: ShiftRequest[];
+  notices: Notice[];
   rates: PayRates;
   pending: boolean; // changes saved on this phone but not yet sent
   online: boolean;
@@ -49,6 +51,7 @@ let state: AppState = {
   team: null,
   shifts: [],
   requests: [],
+  notices: [],
   rates: {},
   pending: false,
   online: true,
@@ -67,11 +70,13 @@ let stopTeam: Unsubscribe | null = null;
 let stopShifts: Unsubscribe | null = null;
 let stopRequests: Unsubscribe | null = null;
 let stopRates: Unsubscribe | null = null;
+let stopNotices: Unsubscribe | null = null;
+let firstNotices = true;
 let watching: string | null = null; // the team being listened to
 let watchingAsManager: boolean | null = null; // which shifts are being listened to
 let firstShifts = true;
 let firstRequests = true;
-let pendingParts = { profile: false, team: false, shifts: false, requests: false, rates: false };
+let pendingParts = { profile: false, team: false, shifts: false, requests: false, rates: false, notices: false };
 let toastId = 0;
 let startingName = "";
 
@@ -98,9 +103,10 @@ function stopTeamParts() {
   stopShifts?.();
   stopRequests?.();
   stopRates?.();
-  stopShifts = stopRequests = stopRates = null;
+  stopNotices?.();
+  stopShifts = stopRequests = stopRates = stopNotices = null;
   watchingAsManager = null;
-  firstShifts = firstRequests = true;
+  firstShifts = firstRequests = firstNotices = true;
 }
 
 function stopWatchingTeam() {
@@ -136,7 +142,7 @@ function retryLater(id: string) {
 function lostTeam(id: string) {
   const name = state.team?.id === id ? state.team.name : "that team";
   stopWatchingTeam();
-  set({ team: null, shifts: [], requests: [], rates: {}, status: "noTeam" });
+  set({ team: null, shifts: [], requests: [], notices: [], rates: {}, status: "noTeam" });
   addToast(`You're no longer in ${name}.`);
   // Imported here, not at the top, because actions.ts imports this file
   import("@/lib/actions").then(({ forgetTeam }) => forgetTeam(id));
@@ -180,6 +186,21 @@ function watchParts(id: string, manager: boolean) {
     () => set({ requests: [] }),
   );
 
+  stopNotices = onSnapshot(
+    collection(db, "teams", id, "notices"),
+    { includeMetadataChanges: true },
+    (snap) => {
+      setPending("notices", snap.metadata.hasPendingWrites);
+      const notices = snap.docs.map((d) => readNotice(d.id, d.data()));
+      if (!firstNotices && state.uid && state.team && !snap.metadata.hasPendingWrites) {
+        for (const text of noticeChanges(state.notices, notices, state.uid, state.team)) addToast(text);
+      }
+      firstNotices = false;
+      set({ notices });
+    },
+    () => set({ notices: [] }),
+  );
+
   if (manager) {
     stopRates = onSnapshot(
       doc(db, "teams", id, "private", "pay"),
@@ -201,7 +222,7 @@ function watchTeam(id: string, retrying = false) {
   stopWatchingTeam();
   watching = id;
   if (!retrying) retries = 0;
-  set({ team: null, shifts: [], requests: [], rates: {}, status: "loading" });
+  set({ team: null, shifts: [], requests: [], notices: [], rates: {}, status: "loading" });
 
   stopTeam = onSnapshot(
     doc(firebase().db, "teams", id),
@@ -250,7 +271,7 @@ export function connect(uid: string, name: string) {
       if (current) watchTeam(current);
       else {
         stopWatchingTeam();
-        set({ team: null, shifts: [], requests: [], rates: {}, status: "noTeam" });
+        set({ team: null, shifts: [], requests: [], notices: [], rates: {}, status: "noTeam" });
       }
     },
     () => set({ status: "noTeam", problem: "Couldn't load your profile. Check your connection and refresh." }),
@@ -265,8 +286,8 @@ export function disconnect() {
     window.removeEventListener("online", onOnline);
     window.removeEventListener("offline", onOnline);
   }
-  pendingParts = { profile: false, team: false, shifts: false, requests: false, rates: false };
-  set({ uid: null, status: "loading", profile: emptyProfile, team: null, shifts: [], requests: [], rates: {}, pending: false, toasts: [], problem: null });
+  pendingParts = { profile: false, team: false, shifts: false, requests: false, rates: false, notices: false };
+  set({ uid: null, status: "loading", profile: emptyProfile, team: null, shifts: [], requests: [], notices: [], rates: {}, pending: false, toasts: [], problem: null });
 }
 
 export function getApp() {

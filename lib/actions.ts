@@ -1,13 +1,16 @@
 "use client";
 
-import { arrayRemove, arrayUnion, collection, deleteField, doc, getDoc, getDocs, setDoc, updateDoc, writeBatch, type WriteBatch } from "firebase/firestore";
+import { arrayRemove, arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, setDoc, updateDoc, writeBatch, type WriteBatch } from "firebase/firestore";
 import { firebase } from "@/lib/firebase";
 import { isInviteCode, makeInviteCode } from "@/lib/invite";
 import { MAX_NAME } from "@/lib/members";
 import { copyWeek } from "@/lib/rota";
+import { makeExtraId, rotaIds } from "@/lib/team";
 import { MAX_NOTE } from "@/lib/requests";
+import { MAX_NOTICE } from "@/lib/notices";
+import { isValidUnavailable } from "@/lib/availability";
 import { getApp, reportProblem } from "@/lib/store";
-import type { Invite, Shift, ShiftRequest, Team } from "@/lib/types";
+import type { Invite, Notice, Shift, ShiftRequest, Team, Unavailable } from "@/lib/types";
 
 /*
   Every change ShiftBoard makes to Firestore. firestore.rules checks each one on Google's
@@ -144,7 +147,8 @@ async function deleteTeamData(t: Team) {
   const ref = doc(db(), "teams", t.id);
   const shifts = await getDocs(collection(ref, "shifts"));
   const requests = await getDocs(collection(ref, "requests"));
-  await deleteAll([...shifts.docs, ...requests.docs], (batch) => {
+  const notices = await getDocs(collection(ref, "notices"));
+  await deleteAll([...shifts.docs, ...requests.docs, ...notices.docs], (batch) => {
     batch.delete(doc(ref, "private", "pay"));
     batch.delete(doc(db(), "invites", t.inviteCode));
     batch.delete(ref);
@@ -194,9 +198,68 @@ export function setManager(memberId: string, manager: boolean) {
   quietly(updateDoc(doc(db(), "teams", t.id), { managerIds: manager ? arrayUnion(memberId) : arrayRemove(memberId) }));
 }
 
-/** What someone usually does, e.g. "Barista" (managers set it for anyone) */
+/** What someone usually does, e.g. "Barista" (managers set it for anyone, including people added by name) */
 export function setRole(memberId: string, role: string) {
-  quietly(updateDoc(doc(db(), "teams", team().id), { [`members.${memberId}.role`]: cleanName(role, 30) }));
+  const field = team().extras?.[memberId] ? `extras.${memberId}.role` : `members.${memberId}.role`;
+  quietly(updateDoc(doc(db(), "teams", team().id), { [field]: cleanName(role, 30) }));
+}
+
+// ---------- People added by name (managers) ----------
+
+/** Adds someone who doesn't have an account yet, so they can go on the rota straight away */
+export function addExtra(name: string, role: string) {
+  const clean = cleanName(name);
+  if (!clean) return;
+  quietly(updateDoc(doc(db(), "teams", team().id), { [`extras.${makeExtraId()}`]: { name: clean, role: cleanName(role, 30), addedAt: Date.now() } }));
+}
+
+export function renameExtra(extraId: string, name: string) {
+  const clean = cleanName(name);
+  if (!clean) return;
+  quietly(updateDoc(doc(db(), "teams", team().id), { [`extras.${extraId}.name`]: clean }));
+}
+
+/** Removes someone added by name. Their coming shifts become open shifts. */
+export async function removeExtra(extraId: string) {
+  const t = team();
+  const batch = writeBatch(db());
+  batch.update(doc(db(), "teams", t.id), { [`extras.${extraId}`]: deleteField() });
+  const today = new Date().toISOString().slice(0, 10);
+  for (const s of getApp().shifts.filter((s) => s.staffId === extraId && s.date >= today).slice(0, 400)) {
+    batch.update(doc(db(), "teams", t.id, "shifts", s.id), { staffId: "" });
+  }
+  if (getApp().rates[extraId]) batch.set(doc(db(), "teams", t.id, "private", "pay"), { rates: { [extraId]: deleteField() } }, { merge: true });
+  await batch.commit();
+}
+
+/**
+ * Someone added by name has joined with the invite link: every shift of theirs (past ones too, so
+ * their hours stay together) moves to their account, and their role and pay rate come with them.
+ */
+export async function linkExtra(extraId: string, memberId: string) {
+  const t = team();
+  const extra = t.extras?.[extraId];
+  if (!extra || !t.memberIds.includes(memberId)) return;
+  const shifts = getApp().shifts.filter((s) => s.staffId === extraId);
+  for (let i = 0; i < Math.max(shifts.length, 1); i += 400) {
+    const batch = writeBatch(db());
+    shifts.slice(i, i + 400).forEach((s) => batch.update(doc(db(), "teams", t.id, "shifts", s.id), { staffId: memberId }));
+    if (i + 400 >= shifts.length) {
+      const change: Record<string, unknown> = { [`extras.${extraId}`]: deleteField() };
+      if (extra.role && !t.members[memberId]?.role) change[`members.${memberId}.role`] = extra.role;
+      batch.update(doc(db(), "teams", t.id), change);
+      const rate = getApp().rates[extraId];
+      if (rate) batch.set(doc(db(), "teams", t.id, "private", "pay"), { rates: { [memberId]: getApp().rates[memberId] || rate, [extraId]: deleteField() } }, { merge: true });
+    }
+    await batch.commit();
+  }
+}
+
+// ---------- Availability (each person sets their own) ----------
+
+export function setMyUnavailable(list: Unavailable[]) {
+  const clean = list.filter(isValidUnavailable).slice(0, 14).map((u) => ({ day: u.day, from: u.from, to: u.to }));
+  quietly(updateDoc(doc(db(), "teams", team().id), { [`members.${me()}.unavailable`]: clean }));
 }
 
 /** Deletes the team for everyone (managers only) */
@@ -232,8 +295,16 @@ const shiftsOf = (id: string) => collection(db(), "teams", id, "shifts");
 
 export type ShiftFields = Pick<Shift, "staffId" | "date" | "start" | "end" | "breakMins" | "note">;
 
+/** Only the fields a shift is made of (the form may hold more, like its id), tidied up */
 function cleanShift(f: ShiftFields): ShiftFields {
-  return { ...f, breakMins: Math.min(240, Math.max(0, Math.round(f.breakMins))), note: cleanName(f.note, 40) };
+  return {
+    staffId: f.staffId,
+    date: f.date,
+    start: f.start,
+    end: f.end,
+    breakMins: Math.min(240, Math.max(0, Math.round(f.breakMins))),
+    note: cleanName(f.note, 40),
+  };
 }
 
 /** Adds a shift. It's a draft until the week is published, unless the week is already out. */
@@ -274,13 +345,48 @@ export function publishWeek(shifts: Shift[]) {
 /** "Copy last week": adds last week's shifts to this week, as drafts. Returns how many were added. */
 export function copyLastWeek(fromMonday: string) {
   const t = team();
-  const copies = copyWeek(getApp().shifts, fromMonday, t.memberIds).slice(0, 450);
+  const copies = copyWeek(getApp().shifts, fromMonday, rotaIds(t)).slice(0, 450);
   if (copies.length === 0) return 0;
   const batch = writeBatch(db());
   const now = Date.now();
   copies.forEach((s, i) => batch.set(doc(shiftsOf(t.id)), { ...s, createdAt: now + i }));
   quietly(batch.commit());
   return copies.length;
+}
+
+// ---------- Clocking in and out ----------
+
+export function clockIn(shift: Shift) {
+  quietly(updateDoc(doc(shiftsOf(team().id), shift.id), { clockIn: Date.now() }));
+}
+
+export function clockOut(shift: Shift) {
+  quietly(updateDoc(doc(shiftsOf(team().id), shift.id), { clockOut: Date.now() }));
+}
+
+/** A manager corrects the clocked times (null clears one) */
+export function fixClock(shift: Shift, clockInAt: number | null, clockOutAt: number | null) {
+  quietly(updateDoc(doc(shiftsOf(team().id), shift.id), { clockIn: clockInAt, clockOut: clockOutAt }));
+}
+
+// ---------- The notice board ----------
+
+const noticesOf = (id: string) => collection(db(), "teams", id, "notices");
+
+export function postNotice(text: string) {
+  const clean = text.replace(/[ \t]+/g, " ").trim().slice(0, MAX_NOTICE);
+  if (!clean) return;
+  const notice: Omit<Notice, "id"> = { text: clean, by: me(), createdAt: Date.now(), readBy: [] };
+  quietly(setDoc(doc(noticesOf(team().id)), notice));
+}
+
+/** "Got it" */
+export function markNoticeRead(notice: Notice) {
+  quietly(updateDoc(doc(noticesOf(team().id), notice.id), { readBy: arrayUnion(me()) }));
+}
+
+export function deleteNotice(notice: Notice) {
+  quietly(deleteDoc(doc(noticesOf(team().id), notice.id)));
 }
 
 // ---------- Requests ----------

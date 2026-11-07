@@ -1,4 +1,5 @@
-import type { Shift, ShiftRequest } from "@/lib/types";
+import type { Member, Shift, ShiftRequest } from "@/lib/types";
+import { describeUnavailable, unavailableDuring } from "@/lib/availability";
 
 /*
   The rota's arithmetic: weeks, shift lengths, clashes and copying a week.
@@ -101,19 +102,22 @@ export function onTimeOff(staffId: string, date: string, requests: ShiftRequest[
   return requests.some((r) => r.kind === "off" && r.status === "approved" && r.by === staffId && r.from <= date && date <= r.to);
 }
 
-export type Clash = { kind: "double" | "timeOff"; shiftId: string; text: string };
+export type Clash = { kind: "double" | "timeOff" | "unavailable"; shiftId: string; text: string };
 
 /**
  * Problems with the rota, for warnings on the shifts: the same person booked on two shifts that
- * overlap, or booked on a day they have approved time off. Open shifts can't clash.
+ * overlap, booked on a day they have approved time off, or booked when they've said they can't
+ * work (lib/availability.ts). Open shifts can't clash.
  */
-export function clashes(shifts: Shift[], requests: ShiftRequest[], nameOf: (id: string) => string): Clash[] {
+export function clashes(shifts: Shift[], requests: ShiftRequest[], nameOf: (id: string) => string, members: Record<string, Pick<Member, "unavailable">> = {}): Clash[] {
   const out: Clash[] = [];
   const booked = shifts.filter((s) => s.staffId);
   for (const s of booked) {
     const other = booked.find((o) => o.id !== s.id && o.staffId === s.staffId && overlaps(s, o));
     if (other) out.push({ kind: "double", shiftId: s.id, text: `${nameOf(s.staffId)} is also on ${shiftTimes(other)} that day` });
     if (onTimeOff(s.staffId, s.date, requests)) out.push({ kind: "timeOff", shiftId: s.id, text: `${nameOf(s.staffId)} has time off that day` });
+    const cant = unavailableDuring(members[s.staffId], s);
+    if (cant) out.push({ kind: "unavailable", shiftId: s.id, text: `${nameOf(s.staffId)} can't work then (${describeUnavailable(cant)})` });
   }
   return out;
 }

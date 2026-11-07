@@ -31,6 +31,12 @@ whiteboard on a WhatsApp group. The manager is often the owner, doing it on thei
 - **The team.** Invite staff with a link (copy it or send it on WhatsApp), set what each person usually does
   ("Barista") and their pay per hour, make someone a manager, remove people (their coming shifts become open
   shifts), and delete the team for everyone.
+- **Add someone by name.** Put a new staff member on the rota before they've joined, with no account needed.
+  When they join with the invite link, press **They've joined: link**: every shift of theirs moves to their
+  account, and their role and pay rate come with them.
+- **Notice board.** Post a short notice to the team ("Stock take on Friday at 7"). It shows at the top of the
+  rota for 30 days, and managers can see who has read it and who hasn't.
+- **Correct clock times.** If someone forgot to clock out, fix the times in the shift editor.
 
 **For staff**
 - **Your next shift** at the top, with how many paid hours it is.
@@ -39,6 +45,11 @@ whiteboard on a WhatsApp group. The manager is often the owner, doing it on thei
 - **Give a shift away.** Offer one of your shifts to the team. Anyone else can press **I'll take it**, then a
   manager approves.
 - **Ask for time off**, from one day up to 60, with a note.
+- **When you can't work.** Add the times you can't work every week, like "Mondays, all day" or "Fridays,
+  17:00 – 23:59". Managers see them, and the rota warns if you're booked then.
+- **Clock in and out.** From 30 minutes before your shift, a **Clock in** button appears on the rota, then
+  **Clock out**. Your hours use your real times, and arriving more than 5 minutes late is noted.
+- **Got it.** New notices are highlighted until you press **Got it**.
 - **Your hours**, day by day. Pay rates are private to managers.
 
 **For everyone**
@@ -65,7 +76,9 @@ app/              Pages: the rota (/), requests (/requests), hours (/hours), the
 components/       The sign-in screen, the header with the four pages, the rota and the shift editor, toasts,
                   icons and the logo
 lib/              The rota's arithmetic (rota.ts), hours and pay (hours.ts), requests (requests.ts), who can do
-                  what (team.ts), reading data safely and the live messages (read.ts), invite links (invite.ts),
+                  what and people added by name (team.ts), availability (availability.ts), clocking in and out
+                  (clock.ts), the notice board (notices.ts), reading data safely and the live messages (read.ts),
+                  invite links (invite.ts),
                   names and colours (members.ts), money (money.ts), the live store (store.ts) and every change
                   to the database (actions.ts)
 tests/            Unit tests for everything in lib/ that doesn't need Firebase
@@ -81,7 +94,20 @@ ends the next morning.
 
 **Clashes** (`clashes()` in `lib/rota.ts`). Two shifts clash when the same person is on both and their times
 overlap (back to back, like 08:00–12:00 and 12:00–16:00, is fine), including a night shift running into the next
-morning. A shift on a day the person has approved time off is a clash too.
+morning. A shift on a day the person has approved time off is a clash too, and so is a shift in a time they've
+said they can't work (`lib/availability.ts`).
+
+**People added by name** (`lib/team.ts`). They're kept on the team as "extras", with an id starting `x-` so it can
+never be mistaken for an account. Shifts can be given to them like anyone else. Linking moves all their shifts
+(past ones too, so their hours stay together) to the account in one batch, then removes the extra.
+
+**Clocking in and out** (`lib/clock.ts`). The time comes from the phone, and the security rules only accept a time
+within 5 minutes of Google's own clock, so nobody can clock in for yesterday or for later. You can only clock into
+your own published shift, once, and clock out after that. Hours use the clocked times when a shift has both, and
+keep the rota's hours as "planned" so the two can be compared.
+
+**The notice board** (`lib/notices.ts`). Each notice keeps a list of who has read it. Pressing "Got it" adds only
+yourself to that list (the rules check), so the read receipts can be trusted.
 
 **Drafts and publishing.** Every shift has a `published` flag. Managers listen to all the shifts; staff listen
 only to published ones, and the security rules refuse to send a draft to anyone who isn't a manager, so a draft
@@ -91,7 +117,8 @@ can't leak even if someone changes the app's code.
 or cancelled. Approving a giveaway changes the request and moves the shift in one batch, so they can't get out of
 step.
 
-**Hours and pay** (`lib/hours.ts`). Hours are paid time: each published shift's length minus its unpaid break.
+**Hours and pay** (`lib/hours.ts`). Hours are paid time: each published shift's length minus its unpaid break, or
+the clocked times minus the break when someone clocked in and out.
 Pay is hours × the person's rate, as a guide for payroll. It doesn't include overtime, Sunday or public holiday
 rates (the Basic Conditions of Employment Act sets those), and the page says so. More than 45 hours in a week is
 flagged, because 45 ordinary hours a week is the usual limit in South Africa. Money is kept in cents, so sums are
@@ -100,8 +127,8 @@ exact.
 **Pay is private.** Pay rates live in their own document (`teams/{id}/private/pay`) that only managers can read,
 not on the team, which everyone in the team can read.
 
-**Live updates** (`lib/store.ts`). The app listens to your profile, your team, its shifts, its requests and (for
-managers) pay. When someone else changes something, Firestore sends the new version, every screen re-draws, and
+**Live updates** (`lib/store.ts`). The app listens to your profile, your team, its shifts, its requests, its notices and
+(for managers) pay. When someone else changes something, Firestore sends the new version, every screen re-draws, and
 `lib/read.ts` turns the change into a message. If you become a manager, the app starts listening to drafts and pay
 straight away.
 
@@ -116,6 +143,10 @@ can't leave while others are still in it.
 - the rota: only managers can add, change, publish or delete shifts; staff only ever see published shifts
 - requests: you can only ask for yourself, and only give away a shift that's yours; anyone else can offer to take
   it; only managers approve or decline
+- clocking in and out: only on your own published shift, once each, and only with a time close to now; managers
+  can correct the times
+- the notice board: only managers post or delete notices; anyone can mark one as read, only for themselves
+- availability: each person sets their own; people added by name are managed by managers
 - pay rates: only managers can see or change them
 - joining: only yourself, as staff, with a real invite code; leaving: only yourself, and never the last manager
   while others stay
@@ -126,7 +157,9 @@ can't leave while others are still in it.
 `npm test` runs the unit tests in `tests/` with Vitest: weeks across months and years, shift lengths and night
 shifts, clashes, copying a week, the WhatsApp message and calendar file, hours and pay (including the 45-hour
 flag and the payroll CSV), requests (what managers see, shifts up for grabs, checking time off), who can leave or
-stop being a manager, the live messages, reading broken data safely, invite codes, names and money.
+stop being a manager, people added by name, availability (and its clash warning), clocking in and out (the
+30-minute window, night shifts, late arrivals and worked hours), the notice board, the live messages, reading broken
+data safely, invite codes, names and money.
 GitHub runs them on every push (`.github/workflows/tests.yml`).
 
 ## Setup (run it yourself)
@@ -160,8 +193,12 @@ the rota is `firestore.rules`.
   using it can be sent the week on WhatsApp.
 - **Pay is an estimate**, with no overtime, Sunday or public holiday rates, and no UIF or tax. It's for payroll to
   check, not a payslip.
-- **No clocking in and out.** Hours come from the rota, so a shift that ran late has to be edited by a manager.
-- **No repeating shifts** beyond "Copy last week", and no availability ("I can't work Mondays") yet.
+- **Clocking in uses the phone, not a location check.** Someone could press Clock in before they arrive; managers
+  can see clocked times and correct them.
+- **Availability is weekly only**, not for one date (that's what time off is for), and a night shift is checked
+  against the day it starts.
+- **No repeating shifts** beyond "Copy last week".
+- **People added by name can't sign in** until they join with the invite link and a manager links them up.
 - **Invite links don't expire** on their own. A manager can press "New link" to retire the old one.
 - **Someone who's removed keeps what's already on their phone** until the app notices (usually straight away);
   the rules stop them reading or changing anything new.

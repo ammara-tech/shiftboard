@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canLeave, canStepDown, isManager, people, teamChanges } from "@/lib/team";
+import { canLeave, canStepDown, isManager, linkCandidates, makeExtraId, people, personName, rotaIds, teamChanges } from "@/lib/team";
 
 const team = {
   managerIds: ["me"],
@@ -29,6 +29,32 @@ describe("managers and staff", () => {
       ["Lerato", false],
       ["Thabo", false],
     ]);
+  });
+});
+
+describe("people added by name", () => {
+  const withExtras = { ...team, extras: { "x-AAA": { name: "Zanele", role: "Waiter", addedAt: 9 } } };
+
+  it("come after everyone who has joined, and can be put on the rota", () => {
+    expect(people(withExtras).map((p) => [p.name, p.extra])).toEqual([
+      ["Ammara", false],
+      ["Lerato", false],
+      ["Thabo", false],
+      ["Zanele", true],
+    ]);
+    expect(rotaIds(withExtras)).toEqual(["me", "thabo", "lerato", "x-AAA"]);
+    expect(personName(withExtras, "x-AAA")).toBe("Zanele");
+    expect(personName(withExtras, "gone")).toBe("Someone");
+  });
+
+  it("get an id that can't be mistaken for an account", () => {
+    const id = makeExtraId(() => new Uint8Array(10));
+    expect(id).toBe("x-AAAAAAAAAA");
+    expect(makeExtraId()).toMatch(/^x-[A-Z2-9]{10}$/);
+  });
+
+  it("are linked to the newest people first, since they've usually just joined", () => {
+    expect(linkCandidates(team).map((c) => c.name)).toEqual(["Lerato", "Thabo", "Ammara"]);
   });
 });
 

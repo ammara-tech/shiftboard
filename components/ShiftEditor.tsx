@@ -2,9 +2,11 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Icon from "@/components/Icon";
-import type { ShiftFields } from "@/lib/actions";
+import { fixClock, type ShiftFields } from "@/lib/actions";
+import { unavailableDuring } from "@/lib/availability";
+import { clockTime, correctedTime } from "@/lib/clock";
 import { clashes, dayLabel, formatMinutes, isIsoDate, isTime, onTimeOff, paidMinutes } from "@/lib/rota";
-import { people } from "@/lib/team";
+import { people, personName } from "@/lib/team";
 import type { Shift, ShiftRequest, Team } from "@/lib/types";
 
 /*
@@ -38,6 +40,8 @@ export default function ShiftEditor({
   const dialog = useRef<HTMLDialogElement>(null);
   const [f, setF] = useState<ShiftFields>(start);
   const [error, setError] = useState<string | null>(null);
+  const [inAt, setInAt] = useState(typeof shift?.clockIn === "number" ? clockTime(shift.clockIn) : "");
+  const [outAt, setOutAt] = useState(typeof shift?.clockOut === "number" ? clockTime(shift.clockOut) : "");
 
   useEffect(() => {
     const d = dialog.current;
@@ -45,14 +49,21 @@ export default function ShiftEditor({
   }, []);
 
   const valid = isIsoDate(f.date) && isTime(f.start) && isTime(f.end) && f.start !== f.end;
-  const nameOf = (id: string) => team.members[id]?.name || "Someone";
+  const nameOf = (id: string) => personName(team, id);
   const draft: Shift = { id: shift?.id ?? "new", published: false, createdAt: 0, ...f };
   const others = shifts.filter((s) => s.id !== draft.id);
-  const warnings = valid ? clashes([...others, draft], requests, nameOf).filter((c) => c.shiftId === draft.id) : [];
+  const warnings = valid ? clashes([...others, draft], requests, nameOf, team.members).filter((c) => c.shiftId === draft.id) : [];
+  const clocked = Boolean(shift && shift.published && (typeof shift.clockIn === "number" || typeof shift.clockOut === "number"));
 
   function submit(e: FormEvent) {
     e.preventDefault();
     if (!valid) return setError(f.start === f.end ? "The shift has to end at a different time from when it starts." : "Fill in the day and both times.");
+    if (shift && clocked) {
+      const newIn = isTime(inAt) ? correctedTime(f, inAt, false) : null;
+      const newOut = isTime(outAt) ? correctedTime(f, outAt, true) : null;
+      if (newOut !== null && (newIn === null || newOut <= newIn)) return setError("The clock-out time has to be after the clock-in time.");
+      if (newIn !== (shift.clockIn ?? null) || newOut !== (shift.clockOut ?? null)) fixClock(shift, newIn, newOut);
+    }
     onSave(f);
   }
 
@@ -83,7 +94,9 @@ export default function ShiftEditor({
                 <option key={p.id} value={p.id}>
                   {p.name}
                   {p.role ? ` (${p.role})` : ""}
+                  {p.extra ? " · not joined yet" : ""}
                   {isIsoDate(f.date) && onTimeOff(p.id, f.date, requests) ? " · time off that day" : ""}
+                  {valid && unavailableDuring(team.members[p.id], f) ? " · can't work then" : ""}
                 </option>
               ))}
             </select>
@@ -115,6 +128,23 @@ export default function ShiftEditor({
             <input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} maxLength={40} placeholder="e.g. Opening" className="field mt-1 font-normal" />
           </label>
         </div>
+
+        {clocked && (
+          <fieldset className="mt-4 rounded-xl border border-line p-3">
+            <legend className="px-1 text-sm font-semibold">Clocked times (correct them if needed)</legend>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block text-sm">
+                Clocked in
+                <input type="time" value={inAt} onChange={(e) => setInAt(e.target.value)} className="field mt-1" />
+              </label>
+              <label className="block text-sm">
+                Clocked out
+                <input type="time" value={outAt} onChange={(e) => setOutAt(e.target.value)} className="field mt-1" />
+              </label>
+            </div>
+            <p className="mt-1 text-xs text-ink-soft">Empty a box to clear that time. Hours use these times instead of the rota&apos;s.</p>
+          </fieldset>
+        )}
 
         <p className="mt-4 text-sm text-ink-soft" aria-live="polite">
           {valid

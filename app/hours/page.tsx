@@ -6,7 +6,7 @@ import Icon from "@/components/Icon";
 import { formatMinutes, hoursCsv, totals, weekHours } from "@/lib/hours";
 import { formatRand } from "@/lib/money";
 import { addDays, DAY_NAMES, todayIso, weekLabel, weekStart } from "@/lib/rota";
-import { isManager } from "@/lib/team";
+import { isManager, personName, rotaIds } from "@/lib/team";
 import { useApp } from "@/lib/store";
 
 /*
@@ -14,6 +14,8 @@ import { useApp } from "@/lib/store";
   - Managers: everyone's hours, a pay estimate from the rates on the Team page, and
     "Download for payroll" (a CSV file for Excel, Google Sheets or an accountant).
   - Staff: their own hours, day by day (pay rates are private to managers).
+  When people clock in and out, their real times are used, the rota's hours are shown as
+  "planned", and late arrivals are counted.
   More than 45 hours in a week is flagged. lib/hours.ts does the sums.
 */
 
@@ -22,8 +24,8 @@ export default function HoursPage() {
   const [monday, setMonday] = useState(() => weekStart(todayIso()));
   if (!team || !uid) return null;
   const manager = isManager(team, uid);
-  const nameOf = (id: string) => team.members[id]?.name || "Someone who left";
-  const all = weekHours(shifts, monday, manager ? rates : {}, manager ? team.memberIds : [uid]).sort((a, b) => nameOf(a.staffId).localeCompare(nameOf(b.staffId)));
+  const nameOf = (id: string) => (team.members[id] || team.extras?.[id] ? personName(team, id) : "Someone who left");
+  const all = weekHours(shifts, monday, manager ? rates : {}, manager ? rotaIds(team) : [uid]).sort((a, b) => nameOf(a.staffId).localeCompare(nameOf(b.staffId)));
   const rows = manager ? all : all.filter((r) => r.staffId === uid);
   const sum = totals(rows);
 
@@ -42,8 +44,8 @@ export default function HoursPage() {
       <h1 className="text-3xl font-extrabold tracking-tight">{manager ? "Hours and pay" : "Your hours"}</h1>
       <p className="mt-2 text-ink-soft">
         {manager
-          ? "From the published rota: each shift's length minus its unpaid break."
-          : "From your published shifts: each shift's length minus its unpaid break."}
+          ? "From the published rota: each shift's length minus its unpaid break, or the clocked times when people clocked in and out."
+          : "From your published shifts: each shift's length minus its unpaid break, or your clocked times."}
       </p>
 
       <div className="mt-6 flex flex-wrap items-center gap-2">
@@ -119,6 +121,10 @@ export default function HoursPage() {
                 ))}
                 <td className="p-3 text-right font-bold tabular-nums">
                   {formatMinutes(r.minutes)}
+                  {r.clocked > 0 && r.planned !== r.minutes && (
+                    <span className="block text-xs font-normal text-ink-soft">planned {formatMinutes(r.planned)}</span>
+                  )}
+                  {r.late > 0 && <span className="block text-xs font-semibold text-alert">late {r.late}×</span>}
                   {r.overLimit && (
                     <span className="mt-0.5 flex items-center justify-end gap-1 text-xs font-semibold text-alert">
                       <Icon name="warn" className="h-3.5 w-3.5" />

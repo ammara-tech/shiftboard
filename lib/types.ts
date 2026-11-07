@@ -6,6 +6,7 @@
                                   and its current invite code
   teams/{id}/shifts/{shiftId}     one shift: who, which day, from when to when, and the break
   teams/{id}/requests/{reqId}     a request for time off, or a shift someone wants to give away
+  teams/{id}/notices/{noticeId}   a notice from a manager to the team, and who has read it
   teams/{id}/private/pay          pay rates per person: only managers can read or change it
   invites/{code}                  an invite link: which team it's for (only works if you know the code)
 
@@ -13,10 +14,25 @@
   so a shift means the same thing on every phone, whatever its time zone.
 */
 
+/** A time someone can't work, every week. from/to "" means the whole day. */
+export type Unavailable = {
+  day: number; // 0 = Monday … 6 = Sunday
+  from: string; // "17:00", or "" for all day
+  to: string; // "23:59", or "" for all day
+};
+
 export type Member = {
   name: string;
   joinedAt: number;
   role?: string; // what they usually do, e.g. "Barista" or "Stylist" ("" = not set)
+  unavailable?: Unavailable[]; // when they can't work (lib/availability.ts); each person sets their own
+};
+
+/** Someone a manager added by name, who doesn't have an account yet (lib/team.ts) */
+export type Extra = {
+  name: string;
+  role?: string;
+  addedAt: number;
 };
 
 export type Team = {
@@ -26,6 +42,7 @@ export type Team = {
   managerIds: string[]; // who can build the rota, approve requests and see pay (always at least one)
   memberIds: string[]; // everyone, managers included
   members: Record<string, Member>;
+  extras?: Record<string, Extra>; // people added by name, who can be put on the rota before they join
   inviteCode: string;
   createdAt: number;
   lastInvite?: string; // the invite code used by the last person to join (the rules check it)
@@ -41,6 +58,16 @@ export type Shift = {
   note: string; // e.g. "Opening" or "Stock take"
   published: boolean; // staff only see shifts once the manager publishes the week
   createdAt: number;
+  clockIn?: number | null; // when they clocked in (ms), from their phone (lib/clock.ts)
+  clockOut?: number | null; // when they clocked out (ms)
+};
+
+export type Notice = {
+  id: string;
+  text: string;
+  by: string; // the manager who posted it
+  createdAt: number;
+  readBy: string[]; // who pressed "Got it"
 };
 
 export type RequestKind = "off" | "giveaway";
