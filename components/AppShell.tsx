@@ -12,6 +12,8 @@ import Logo from "@/components/Logo";
 import Toasts from "@/components/Toasts";
 import Welcome from "@/components/Welcome";
 import Icon from "@/components/Icon";
+import DemoBanner from "@/components/DemoBanner";
+import { seedDemoOnce } from "@/lib/demo";
 
 /*
   Wraps every page. Until someone is signed in, it shows the sign-in screen instead,
@@ -27,9 +29,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const user = auth.status === "signedIn" ? auth.user : null;
 
   useEffect(() => {
-    if (user) connect(user.uid, defaultName(user));
+    if (user) connect(user.uid, user.isAnonymous ? "Guest" : defaultName(user));
     else disconnect();
   }, [user]);
+
+  // "Try the demo": a guest with no team yet gets a made-up café, once (lib/demo.ts)
+  const demo = Boolean(user?.isAnonymous);
+  useEffect(() => {
+    if (demo && user && app.status === "noTeam" && app.uid === user.uid) seedDemoOnce(user.uid, true);
+  }, [demo, user, app.status, app.uid]);
 
   if (!firebaseConfigured) return <SetupNeeded />;
   // Until Firebase has checked, both screens are on the page and the saved hint picks one
@@ -57,6 +65,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-card focus:px-4 focus:py-2">
         Skip to the main content
       </a>
+      {demo && <DemoBanner />}
       {app.team && <Header />}
       <main id="main" className="mx-auto max-w-5xl px-4 pb-28 pt-6">
         {!app.online && (

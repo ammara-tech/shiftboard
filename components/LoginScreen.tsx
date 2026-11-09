@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import Icon from "@/components/Icon";
 import Logo from "@/components/Logo";
 import ThemeToggle from "@/components/ThemeToggle";
-import { authErrorMessage, errorCode, finishRedirectSignIn, resetPassword, signInEmail, signInGoogle, signUpEmail } from "@/lib/auth";
+import { authErrorMessage, errorCode, finishRedirectSignIn, resetPassword, signInDemo, signInEmail, signInGoogle, signUpEmail } from "@/lib/auth";
 
 /*
   The sign-in screen. On a laptop the navy side shows three small example cards
@@ -20,6 +20,21 @@ export default function LoginScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ text: string; code: string } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Opened from a "Try the demo" link (…/?demo): the demo box goes to the top
+  const [fromDemoLink, setFromDemoLink] = useState(false);
+  useEffect(() => {
+    setFromDemoLink(new URLSearchParams(window.location.search).has("demo"));
+  }, []);
+
+  const demoBox = (
+    <div className="rounded-xl border border-dashed border-marker/40 bg-marker-soft p-4">
+      <p className="font-bold">Just looking?</p>
+      <p className="mt-1 text-sm text-ink-soft">Try ShiftBoard as the manager of a made-up café, with staff, a rota and a notice. No account needed, and everything is deleted when you end the demo.</p>
+      <button type="button" disabled={busy} onClick={() => run(signInDemo)} className="btn mt-3 w-full py-2.5">
+        Try the demo
+      </button>
+    </div>
+  );
   const invited = usePathname() === "/join"; // the same on the server and in the browser
 
   // If Google sign-in went the full-page way and failed, say why when the page comes back.
@@ -85,6 +100,7 @@ export default function LoginScreen() {
         </div>
 
         <div className="m-auto w-full max-w-sm py-10">
+          {fromDemoLink && <div className="mb-8">{demoBox}</div>}
           {invited && (
             <p className="mb-6 rounded-xl border border-marker/40 bg-marker-soft px-4 py-3 text-sm">
               <strong>You&apos;ve been invited to a team.</strong> Sign in or create an account, and you&apos;ll join it straight after.
@@ -166,6 +182,7 @@ export default function LoginScreen() {
               {mode === "signIn" ? "Create an account" : "Sign in"}
             </button>
           </p>
+          {!fromDemoLink && <div className="mt-6">{demoBox}</div>}
           <p className="mt-6 text-sm text-ink-soft">Only the people in your team can see its rota, and only managers see pay. Everything is stored in Google&apos;s Firebase database.</p>
         </div>
       </main>

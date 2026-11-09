@@ -4,7 +4,7 @@ import { arrayRemove, arrayUnion, collection, deleteDoc, deleteField, doc, getDo
 import { firebase } from "@/lib/firebase";
 import { isInviteCode, makeInviteCode } from "@/lib/invite";
 import { MAX_NAME } from "@/lib/members";
-import { copyWeek } from "@/lib/rota";
+import { addDays, copyWeek, todayIso, weekStart } from "@/lib/rota";
 import { makeExtraId, rotaIds } from "@/lib/team";
 import { MAX_NOTE } from "@/lib/requests";
 import { MAX_NOTICE } from "@/lib/notices";
@@ -431,4 +431,73 @@ export function decideRequest(request: ShiftRequest, approve: boolean) {
 export function setRate(memberId: string, cents: number) {
   if (!team().memberIds.includes(memberId)) return;
   quietly(setDoc(doc(db(), "teams", team().id, "private", "pay"), { rates: { [memberId]: cents > 0 ? cents : deleteField() } }, { merge: true }));
+}
+
+// ---------- Try the demo ----------
+
+/**
+ * For a new demo (lib/demo.ts): a made-up café with three staff added by name, this week's rota
+ * published (with today's shifts), next week's as drafts, a notice and a time-off request.
+ * The staff go on first, because the rules check a shift's person is in the team.
+ */
+export async function seedDemo() {
+  const uid = me();
+  const id = await createTeam("Demo Café");
+  const staff = [
+    { id: makeExtraId(), name: "Thabo", role: "Barista" },
+    { id: makeExtraId(), name: "Lerato", role: "Cook" },
+    { id: makeExtraId(), name: "Naledi", role: "Waiter" },
+  ];
+  const now = Date.now();
+  const extras: Record<string, unknown> = { [`members.${uid}.role`]: "Manager" };
+  staff.forEach((p, i) => (extras[`extras.${p.id}`] = { name: p.name, role: p.role, addedAt: now + i }));
+  await updateDoc(doc(db(), "teams", id), extras);
+
+  const monday = weekStart(todayIso());
+  const batch = writeBatch(db());
+  const people = [uid, ...staff.map((p) => p.id)];
+  const times: [string, string, number][] = [
+    ["07:00", "15:00", 30],
+    ["08:00", "16:30", 30],
+    ["11:00", "19:00", 30],
+    ["15:00", "21:00", 0],
+  ];
+  for (let week = 0; week < 2; week++) {
+    for (let day = 0; day < 6; day++) {
+      const date = addDays(monday, week * 7 + day);
+      people.forEach((staffId, n) => {
+        if ((day + n) % 4 === 3) return; // everyone gets days off
+        const [start, end, breakMins] = times[(n + day) % times.length];
+        batch.set(doc(shiftsOf(id)), { staffId, date, start, end, breakMins, note: n === 0 && day === 0 ? "Opening" : "", published: week === 0, createdAt: now });
+      });
+    }
+  }
+  batch.set(doc(noticesOf(id)), {
+    text: "Welcome to the demo! The new coffee machine arrives on Friday, so please read the guide by the till.",
+    by: uid,
+    createdAt: now,
+    readBy: [],
+  });
+  batch.set(doc(requestsOf(id)), { kind: "off", from: addDays(monday, 12), to: addDays(monday, 13), shiftId: "", note: "Family wedding", by: uid, takerId: "", status: "pending", decidedBy: "", createdAt: now, decidedAt: null });
+  quietly(batch.commit());
+}
+
+/** Deletes the teams the guest manages, leaves any others, and empties the profile. Used when a demo ends. */
+export async function deleteEverything() {
+  const uid = me();
+  for (const id of getApp().profile.teams) {
+    const snap = await getDoc(doc(db(), "teams", id)).catch(() => null);
+    if (!snap?.exists()) continue;
+    const t = { id, ...(snap.data() as Omit<Team, "id">) };
+    // A team the guest manages (their demo café) is deleted for everyone; any other team is left
+    if (t.memberIds.length <= 1 || t.managerIds.includes(uid)) await deleteTeamData(t);
+    else
+      await updateDoc(doc(db(), "teams", id), {
+        memberIds: arrayRemove(uid),
+        managerIds: arrayRemove(uid),
+        [`members.${uid}`]: deleteField(),
+      });
+  }
+  // The profile is emptied rather than deleted (the rules only allow writing it, with these fields)
+  await setDoc(doc(db(), "users", uid), { name: "Guest", teams: [], current: null });
 }

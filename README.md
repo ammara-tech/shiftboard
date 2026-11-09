@@ -59,6 +59,10 @@ whiteboard on a WhatsApp group. The manager is often the owner, doing it on thei
 - **More than one team**, for someone who works at two places.
 - **Installable** ("Add to Home screen"), light and dark mode, and works on a phone and a laptop: the week is a
   table on a laptop and a day-by-day list on a phone.
+- **Try the demo**, with no account: you're signed in as a guest and made the manager of a made-up café with three
+  staff, this week's rota published, next week's as drafts, a notice and a time-off request. A strip at the top says
+  it's a demo, and **End the demo** deletes the café and the guest account. A link ending in `?demo` puts the demo
+  button at the top of the sign-in screen.
 
 ## Design
 A staffroom whiteboard: navy ink on white, marker blue for buttons and booked shifts, amber for drafts and open
@@ -86,6 +90,13 @@ firestore.rules   The security rules (paste them into Firebase)
 ```
 
 ## How the important parts work
+
+**Try the demo** (`lib/demo.ts`). The guest is signed in with Firebase's anonymous sign-in, so they get their own
+private account and the same security rules protect them as anyone else. The first time a guest has no team, the app
+makes "Demo Café" (once: a note on the device remembers). The staff are added first, in their own write, because the
+rules check that a shift's person is in the team. Ending the demo deletes the teams the guest manages (so their demo café), leaves any
+others, and deletes the guest account. To see the staff side, open the invite link in another browser.
+
 
 **Dates and times** (`lib/rota.ts`). A shift's day is a "2026-11-09" string and its times are "08:30" strings, the
 way a rota is written, so a shift means the same on every phone whatever its time zone. Weeks run Monday to
@@ -164,7 +175,7 @@ GitHub runs them on every push (`.github/workflows/tests.yml`).
 
 ## Setup (run it yourself)
 1. **Firebase:** create a project at [console.firebase.google.com](https://console.firebase.google.com).
-   - Authentication → Get started → turn on **Email/Password** and **Google**.
+   - Authentication → Get started → turn on **Email/Password**, **Google** and **Anonymous** (for Try the demo).
    - Firestore Database → Create database (production mode).
    - Firestore Database → **Rules**: paste in `firestore.rules` and press **Publish**.
    - Project settings → General → Your apps → add a **Web app** to get its settings.
@@ -188,6 +199,8 @@ These are public by design: they say which Firebase project to use, they don't u
 the rota is `firestore.rules`.
 
 ## Known gaps
+- **Demos that are never ended stay in the database.** If a guest just closes the tab, their made-up café and
+  guest account stay in Firebase. It's small, and the free plan has plenty of room, but nothing cleans it up automatically yet.
 - **The security rules aren't in the automatic tests.** They'd need the Firebase emulator; they're tested by hand.
 - **No push notifications.** Messages like "The rota is out" show only while the app is open; staff who aren't
   using it can be sent the week on WhatsApp.
