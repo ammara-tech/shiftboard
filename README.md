@@ -65,9 +65,21 @@ whiteboard on a WhatsApp group. The manager is often the owner, doing it on thei
   button at the top of the sign-in screen.
 
 ## Design
-A staffroom whiteboard: navy ink on white, marker blue for buttons and booked shifts, amber for drafts and open
-shifts that still need someone, teal for hours and pay, and red for clashes. Each person keeps the same colour
-everywhere, on the edge of their shifts and their initials. Text colours pass WCAG AA contrast in both themes.
+A timetable drawn on a staffroom whiteboard: a white board with a faint grid, **blue marker** for buttons and booked
+shifts, **magenta marker** for drafts and open shifts that still need someone, teal for hours and pay, and red for
+clashes. **Times and numbers are in a monospaced font** (JetBrains Mono), so they line up like a printed timetable.
+Each person keeps the same colour everywhere, on the edge of their shifts and their initials. Text colours pass WCAG AA
+contrast in both themes. Dark mode is the same board after closing time.
+
+**The sign-in screen is the week on the whiteboard** (`components/LoginScreen.tsx`): the form is Monday's shift, a
+block with a time and a blue marker edge, and on a laptop the rest of the week is behind it with a few shifts already
+on the board. "Try the demo" is an open shift in magenta, waiting for someone to take it.
+
+**Inside, on a laptop, the pages are in a slim rail of icons down the left**, so the rota gets the whole width of the
+screen. On a phone there's a bar at the top with the pages as tabs under it.
+
+Fonts: [Manrope](https://fonts.google.com/specimen/Manrope) for everything, and
+[JetBrains Mono](https://fonts.google.com/specimen/JetBrains+Mono) for times and numbers.
 
 ## Tech stack
 Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4, Firebase Authentication and Cloud Firestore,

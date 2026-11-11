@@ -8,8 +8,9 @@ import ThemeToggle from "@/components/ThemeToggle";
 import { authErrorMessage, errorCode, finishRedirectSignIn, resetPassword, signInDemo, signInEmail, signInGoogle, signUpEmail } from "@/lib/auth";
 
 /*
-  The sign-in screen. On a laptop the navy side shows three small example cards
-  (the rota, requests, and hours and pay), so people see what ShiftBoard does before they sign up.
+  The sign-in screen is the week drawn on the staffroom whiteboard. The form is Monday's shift:
+  a block with a time and a blue marker edge. On a laptop the rest of the week is behind it,
+  with a few shifts already on the board, and "Try the demo" is an open shift in magenta.
   Someone who opened an invite link sees a note that they'll join after signing in.
 */
 export default function LoginScreen() {
@@ -26,8 +27,10 @@ export default function LoginScreen() {
     setFromDemoLink(new URLSearchParams(window.location.search).has("demo"));
   }, []);
 
+  // "Try the demo" is an open shift, in magenta marker, waiting for someone to take it
   const demoBox = (
-    <div className="rounded-xl border border-dashed border-marker/40 bg-marker-soft p-4">
+    <div className="rounded-2xl border-2 border-dashed border-amber bg-amber-soft p-4">
+      <p className="font-mono text-xs font-bold text-amber">OPEN SHIFT · ANY TIME</p>
       <p className="font-bold">Just looking?</p>
       <p className="mt-1 text-sm text-ink-soft">Try ShiftBoard as the manager of a made-up café, with staff, a rota and a notice. No account needed, and everything is deleted when you end the demo.</p>
       <button type="button" disabled={busy} onClick={() => run(signInDemo)} className="btn mt-3 w-full py-2.5">
@@ -75,37 +78,48 @@ export default function LoginScreen() {
     });
   }
 
+  // The week on the whiteboard, behind the sign-in shift (decoration)
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
   return (
-    <div className="grid min-h-screen lg:grid-cols-2">
-      <aside className="relative hidden overflow-hidden bg-[#1b2a4a] p-12 text-white lg:flex lg:flex-col">
-        <p className="flex items-center gap-2 text-2xl font-extrabold">
+    <div className="relative min-h-screen overflow-hidden">
+      <div className="relative z-10 mx-auto flex max-w-6xl items-center justify-between px-5 py-5">
+        <p className="flex items-center gap-2 text-xl font-extrabold">
           <Logo className="h-9 w-9" />
           ShiftBoard
         </p>
-        <DemoBoard />
-        {/* A big line of text, not the page's heading: on phones this side is hidden, so "Welcome back" is the h1 */}
-        <p className="relative mt-auto max-w-md text-5xl font-extrabold leading-[1.05] tracking-tight">Everyone&apos;s shifts, on everyone&apos;s phone.</p>
-        <p className="relative mt-5 max-w-md text-lg text-white/85">
-          The rota for your café, salon or shop. Staff see their shifts the moment you publish, swap shifts and ask for time off, and the hours add up for payroll.
-        </p>
-      </aside>
+        <ThemeToggle />
+      </div>
 
-      <main className="flex flex-col px-5 py-6 sm:px-10">
-        <div className="flex items-center justify-between">
-          <p className="flex items-center gap-2 text-xl font-extrabold lg:invisible">
-            <Logo />
-            ShiftBoard
-          </p>
-          <ThemeToggle />
-        </div>
+      {/* The week drawn on the board: day columns with a few shifts already on them (laptops only, decoration) */}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-20 mx-auto hidden max-w-6xl grid-cols-7 gap-3 px-5 lg:grid">
+        {days.map((d, i) => (
+          <div key={d} className="min-h-[34rem] border-l border-line/80 pl-2">
+            <p className="font-mono text-sm font-bold text-ink-soft">
+              {d} <span className="font-normal">{17 + i}</span>
+            </p>
+            {/* Kept to the right-hand days, so none sits behind the sign-in shift */}
+            {i === 3 && <DecoShift who="Thandi" time="07:00 – 15:00" top="mt-4" />}
+            {i === 4 && <DecoShift who="Open shift" time="10:00 – 18:00" top="mt-12" open />}
+            {i === 5 && <DecoShift who="Lerato" time="08:00 – 14:00" top="mt-4" />}
+            {i === 6 && <DecoShift who="Sipho" time="12:00 – 20:00" top="mt-20" />}
+            {i === 6 && <DecoShift who="Draft" time="09:00 – 13:00" top="mt-[19rem]" open />}
+          </div>
+        ))}
+      </div>
 
-        <div className="m-auto w-full max-w-sm py-10">
-          {fromDemoLink && <div className="mb-8">{demoBox}</div>}
+      <div className="relative z-10 mx-auto grid max-w-6xl gap-10 px-5 pb-16 pt-6 lg:grid-cols-[minmax(0,26rem)_1fr] lg:pt-16">
+        {/* The sign-in form is Monday's shift: a block on the rota with a time and a coloured edge */}
+        <main className="rounded-2xl border-l-[6px] border-marker bg-card p-6 shadow-[0_24px_60px_-28px_rgba(20,26,46,0.45)] ring-1 ring-line sm:p-8">
+          <p className="font-mono text-sm font-bold text-marker">Mon 17 · 08:00 – 08:01</p>
+          <p className="text-xs font-bold uppercase tracking-[0.2em] text-ink-soft">Your shift: signing in</p>
+          {fromDemoLink && <div className="my-6">{demoBox}</div>}
           {invited && (
-            <p className="mb-6 rounded-xl border border-marker/40 bg-marker-soft px-4 py-3 text-sm">
+            <p className="mt-5 rounded-xl border border-marker/40 bg-marker-soft px-4 py-3 text-sm">
               <strong>You&apos;ve been invited to a team.</strong> Sign in or create an account, and you&apos;ll join it straight after.
             </p>
           )}
+          <div className="mt-5">
           <h1 className="text-3xl font-extrabold tracking-tight">{mode === "signIn" ? "Welcome back" : "Create your account"}</h1>
           <p className="mt-2 text-ink-soft">{mode === "signIn" ? "Sign in to see the rota." : "It's free, and takes a minute."}</p>
 
@@ -182,133 +196,30 @@ export default function LoginScreen() {
               {mode === "signIn" ? "Create an account" : "Sign in"}
             </button>
           </p>
-          {!fromDemoLink && <div className="mt-6">{demoBox}</div>}
+          </div>
           <p className="mt-6 text-sm text-ink-soft">Only the people in your team can see its rota, and only managers see pay. Everything is stored in Google&apos;s Firebase database.</p>
+        </main>
+
+        <div className="flex flex-col justify-end gap-8 lg:pb-6 lg:pl-10">
+          <div className="rounded-2xl bg-card/90 p-6 ring-1 ring-line backdrop-blur lg:max-w-md">
+            <p className="text-4xl font-extrabold leading-[1.05] tracking-tight">Everyone&apos;s shifts, on everyone&apos;s phone.</p>
+            <p className="mt-4 text-lg text-ink-soft">
+              The rota for your café, salon or shop. Staff see their shifts the moment you publish, swap shifts and ask for time off, and the hours add up for payroll.
+            </p>
+          </div>
+          {!fromDemoLink && <div className="lg:max-w-md">{demoBox}</div>}
         </div>
-      </main>
+      </div>
     </div>
   );
 }
 
-/*
-  Three made-up cards pinned like notes on a staffroom board, as a preview on the sign-in screen.
-  They sit in a grid, so none hides another and the heading below always has room
-  (on narrower laptops the Requests card is left out). Each shows something ShiftBoard does:
-    the week's rota, with an open shift
-    requests: time off approved, and someone offering to take a shift
-    hours for the week, with a pay estimate
-  Decorative only: screen readers skip it.
-*/
-const card = "rounded-2xl bg-white p-4 text-[#18213a] shadow-[0_24px_50px_-18px_rgba(0,0,0,0.55)]";
-
-function Face({ letter, colour }: { letter: string; colour: string }) {
+/* A shift drawn on the board behind the sign-in form. Decorative only. */
+function DecoShift({ who, time, top, open = false }: { who: string; time: string; top: string; open?: boolean }) {
   return (
-    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white" style={{ background: colour }}>
-      {letter}
-    </span>
-  );
-}
-
-function DemoBoard() {
-  const days = ["Mon", "Tue", "Wed", "Thu", "Fri"];
-  const rows: [string, string, (string | null)[]][] = [
-    ["T", "#2453a6", ["8–4", "8–4", null, "12–8", "8–4"]],
-    ["L", "#b45309", [null, "12–8", "8–4", "8–4", null]],
-    ["S", "#0f766e", ["12–8", null, "12–8", null, "open"]],
-  ];
-  return (
-    <div aria-hidden="true" className="relative mx-auto mb-10 mt-8 grid w-full max-w-[540px] select-none gap-5 xl:grid-cols-2">
-      {/* The week's rota */}
-      <div className={`${card} w-full max-w-[300px] rotate-[-3deg] justify-self-center xl:justify-self-start`}>
-        <p className="flex items-center justify-between text-sm font-bold">
-          <span className="flex items-center gap-1.5">
-            <Icon name="calendar" className="h-4 w-4 text-[#2453a6]" />
-            Rota · 9 – 15 Nov
-          </span>
-          <span className="flex items-center gap-1 text-[11px] text-[#2453a6]">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#2453a6]" />
-            Live
-          </span>
-        </p>
-        {/* The columns are set here, not as a Tailwind class, so the grid can never fall apart */}
-        <div className="mt-3 grid gap-1 text-center text-[10px]" style={{ gridTemplateColumns: "24px repeat(5, minmax(0, 1fr))" }}>
-          <span />
-          {days.map((d) => (
-            <span key={d} className="font-bold uppercase tracking-wider text-[#525c74]">
-              {d}
-            </span>
-          ))}
-          {rows.map(([who, colour, shifts]) => (
-            <div key={who} className="contents">
-              <Face letter={who} colour={colour} />
-              {shifts.map((s, i) =>
-                s === "open" ? (
-                  <span key={i} className="rounded-md border border-dashed border-[#b45309] py-1 font-bold text-[#b45309]">
-                    Open
-                  </span>
-                ) : s ? (
-                  <span key={i} className="rounded-md py-1 font-bold text-white" style={{ background: colour }}>
-                    {s}
-                  </span>
-                ) : (
-                  <span key={i} className="rounded-md bg-[#f3f5f9] py-1" />
-                ),
-              )}
-            </div>
-          ))}
-        </div>
-        <p className="mt-3 rounded-full bg-[#18213a] px-3 py-1.5 text-center text-[11px] font-semibold text-white">The rota for 9 – 15 Nov is out</p>
-      </div>
-
-      {/* Requests */}
-      <div className={`${card} mt-6 hidden w-full max-w-[240px] rotate-[3deg] self-start justify-self-end xl:block`}>
-        <p className="flex items-center gap-1.5 text-sm font-bold">
-          <Icon name="inbox" className="h-4 w-4 text-[#b45309]" />
-          Requests
-        </p>
-        <ul className="mt-2 space-y-2 text-xs">
-          <li className="rounded-lg bg-[#f3f5f9] p-2">
-            <p className="font-semibold">Lerato: time off</p>
-            <p className="text-[#525c74]">Fri 13 Nov – Sat 14 Nov</p>
-            <p className="mt-1 inline-block rounded-full bg-[#dcfce7] px-2 font-bold text-[#166534]">Approved</p>
-          </li>
-          <li className="rounded-lg bg-[#f3f5f9] p-2">
-            <p className="font-semibold">Thabo is giving away Thu 12–8</p>
-            <p className="text-[#525c74]">Sipho offered to take it</p>
-            <p className="mt-1 flex gap-1">
-              <span className="rounded-md bg-[#2453a6] px-2 py-0.5 font-bold text-white">Approve</span>
-              <span className="rounded-md border border-[#dde2ec] px-2 py-0.5 font-bold">Decline</span>
-            </p>
-          </li>
-        </ul>
-      </div>
-
-      {/* Hours and pay */}
-      <div className={`${card} w-full max-w-[260px] rotate-[-1.5deg] justify-self-center xl:col-span-2`}>
-        <p className="flex items-center gap-1.5 text-sm font-bold">
-          <Icon name="clock" className="h-4 w-4 text-[#0f766e]" />
-          Hours this week
-        </p>
-        <ul className="mt-2 space-y-1.5 text-xs">
-          {(
-            [
-              ["Thabo", "30h", "R 1 050,00"],
-              ["Lerato", "22h", "R 770,00"],
-              ["Sipho", "16h", "R 560,00"],
-            ] as const
-          ).map(([name, hours, pay]) => (
-            <li key={name} className="flex items-center justify-between">
-              <span className="font-semibold">{name}</span>
-              <span className="text-[#525c74]">{hours}</span>
-              <span className="font-bold">{pay}</span>
-            </li>
-          ))}
-        </ul>
-        <p className="mt-2 flex items-center justify-center gap-1.5 rounded-lg bg-[#0f766e] py-1.5 text-xs font-bold text-white">
-          <Icon name="download" className="h-3.5 w-3.5" />
-          Download for payroll
-        </p>
-      </div>
+    <div className={`${top} rounded-lg border-l-4 px-2 py-2 text-xs ${open ? "border-dashed border-amber bg-amber-soft text-amber" : "border-marker bg-marker-soft text-marker"}`}>
+      <p className="font-bold">{who}</p>
+      <p className="font-mono">{time}</p>
     </div>
   );
 }

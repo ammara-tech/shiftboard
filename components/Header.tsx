@@ -13,9 +13,11 @@ import { isManager } from "@/lib/team";
 import { useApp } from "@/lib/store";
 
 /*
-  The bar at the top: logo, which team you're in, whether it's live, the theme and you.
-  Under it, the four pages. Requests shows a number when something is waiting for you:
+  The navigation. Requests shows a number when something is waiting for you:
   for a manager, requests to approve; for staff, shifts they could take.
+  - Laptops: a slim rail of icons down the left (logo, the four pages, then whether it's live,
+    the theme and you), so the rota gets the whole width of the screen.
+  - Phones and tablets: a bar at the top with the team, and the four pages as tabs under it.
 */
 const PAGES: { href: string; label: string; icon: IconName }[] = [
   { href: "/", label: "Rota", icon: "calendar" },
@@ -29,8 +31,54 @@ export default function Header() {
   const path = usePathname();
   const waiting = team && uid ? (isManager(team, uid) ? needsManager(requests).length : shiftsUpForGrabs(requests, shifts, uid, todayIso()).length) : 0;
 
+  const badge = (
+    <span className="rounded-full bg-amber px-1.5 text-xs font-bold text-white dark:text-[#0b1020]">
+      {waiting}
+      <span className="sr-only"> waiting</span>
+    </span>
+  );
+
   return (
-    <header className="sticky top-0 z-30 border-b border-line bg-page/90 backdrop-blur">
+    <>
+    {/* Laptops: the rail */}
+    <aside className="fixed inset-y-0 left-0 z-30 hidden w-24 flex-col items-center border-r border-line bg-card py-4 lg:flex">
+      <Link href="/" className="flex flex-col items-center gap-1 text-[11px] font-extrabold tracking-tight" aria-label="ShiftBoard: back to the rota">
+        <Logo className="h-10 w-10" />
+        ShiftBoard
+      </Link>
+      <nav aria-label="Pages" className="mt-8 w-full px-2">
+        <ul className="space-y-1">
+          {PAGES.map((p) => {
+            const current = p.href === "/" ? path === "/" : path.startsWith(p.href);
+            return (
+              <li key={p.href}>
+                <Link
+                  href={p.href}
+                  aria-current={current ? "page" : undefined}
+                  className={`relative flex flex-col items-center gap-1 rounded-xl px-1 py-2.5 text-xs font-bold ${current ? "bg-marker-soft text-marker" : "text-ink-soft hover:bg-page hover:text-ink"}`}
+                >
+                  <Icon name={p.icon} className="h-6 w-6" />
+                  {p.label}
+                  {p.href === "/requests" && waiting > 0 && <span className="absolute right-2 top-1">{badge}</span>}
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
+      <div className="mt-auto flex flex-col items-center gap-2">
+        <SyncBadge />
+        <ThemeToggle />
+        {uid && (
+          <Link href="/team" className="tool" aria-label="You and your team" title={team?.name}>
+            <Avatar uid={uid} name={profile.name || "Me"} />
+          </Link>
+        )}
+      </div>
+    </aside>
+
+    {/* Phones and tablets: the bar at the top, with the pages as tabs */}
+    <header className="sticky top-0 z-30 border-b border-line bg-page/90 backdrop-blur lg:hidden">
       <div className="mx-auto flex h-16 max-w-5xl items-center gap-3 px-4">
         <Link href="/" className="flex items-center gap-2 text-lg font-extrabold tracking-tight" aria-label="ShiftBoard: back to the rota">
           <Logo />
@@ -70,12 +118,7 @@ export default function Header() {
                 >
                   <Icon name={p.icon} className="h-4 w-4" />
                   {p.label}
-                  {p.href === "/requests" && waiting > 0 && (
-                    <span className="rounded-full bg-amber px-1.5 text-xs font-bold text-white dark:text-[#0f1524]">
-                      {waiting}
-                      <span className="sr-only"> waiting</span>
-                    </span>
-                  )}
+                  {p.href === "/requests" && waiting > 0 && badge}
                 </Link>
               </li>
             );
@@ -83,5 +126,6 @@ export default function Header() {
         </ul>
       </nav>
     </header>
+    </>
   );
 }

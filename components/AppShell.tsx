@@ -65,9 +65,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-card focus:px-4 focus:py-2">
         Skip to the main content
       </a>
-      {demo && <DemoBanner />}
       {app.team && <Header />}
-      <main id="main" className="mx-auto max-w-5xl px-4 pb-28 pt-6">
+      {/* On a laptop, everything sits to the right of the rail, and the rota can use the full width */}
+      <div className={app.team ? "lg:pl-24" : undefined}>
+      {demo && <DemoBanner />}
+      <main id="main" className="mx-auto max-w-6xl px-4 pb-28 pt-6 lg:px-8">
         {!app.online && (
           <p className="mb-4 flex items-start gap-2 rounded-xl border border-line bg-card px-4 py-3 text-sm">
             <Icon name="cloudOff" className="mt-0.5 h-4 w-4 shrink-0 text-alert" />
@@ -86,6 +88,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         )}
         {showWelcome ? <Welcome /> : children}
       </main>
+      </div>
       <Toasts />
     </>
   );
